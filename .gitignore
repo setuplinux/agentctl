@@ -1,0 +1,11 @@
+# Build artifacts
+/bin/
+/dist/
+agentctl
+agentctl.exe
+
+# OS/editor
+.DS_Store
+*.swp
+.vscode/
+.idea/
