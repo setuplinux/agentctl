@@ -238,8 +238,9 @@ func installAgentByName(name string, stdout io.Writer, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "install is not supported for %s on %s\n", agent.Name, platform)
 		return 2
 	}
-	if path, err := exec.LookPath(agent.Executable); err == nil && path != "" {
-		fmt.Fprintf(stdout, "skip: %s already installed at %s\n", agent.Name, path)
+	status := agents.CheckAgent(platform, agent, exec.LookPath, captureCommandOutput)
+	if status.State == "installed" && status.Path != "" {
+		fmt.Fprintf(stdout, "skip: %s already installed at %s\n", agent.Name, status.Path)
 		return 0
 	}
 
@@ -248,8 +249,9 @@ func installAgentByName(name string, stdout io.Writer, stderr io.Writer) int {
 	if code != 0 {
 		return code
 	}
-	if path, err := exec.LookPath(agent.Executable); err == nil && path != "" {
-		fmt.Fprintf(stdout, "installed: %s -> %s\n", agent.Name, path)
+	status = agents.CheckAgent(platform, agent, exec.LookPath, captureCommandOutput)
+	if status.State == "installed" && status.Path != "" {
+		fmt.Fprintf(stdout, "installed: %s -> %s\n", agent.Name, status.Path)
 	}
 	if support.FirstRunHint != "" {
 		fmt.Fprintf(stdout, "next: %s\n", support.FirstRunHint)
@@ -295,7 +297,8 @@ func runGenericAgentUpdate(name string, stdout io.Writer, stderr io.Writer) int 
 		fmt.Fprintf(stderr, "update is not supported for %s on %s\n", agent.Name, platform)
 		return 2
 	}
-	if _, err := exec.LookPath(agent.Executable); err != nil {
+	status := agents.CheckAgent(platform, agent, exec.LookPath, captureCommandOutput)
+	if status.State != "installed" || status.Path == "" {
 		fmt.Fprintf(stderr, "%s is not installed\n", agent.Name)
 		return 1
 	}

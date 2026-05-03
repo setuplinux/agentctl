@@ -25,14 +25,41 @@ Write-Host "Downloading $Asset from $Repo..."
 Invoke-WebRequest -Uri $Url -OutFile $OutFile
 
 Write-Host "Installed agentctl to $OutFile"
-$UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
-if ($UserPath -notlike "*$InstallDir*") {
-  [Environment]::SetEnvironmentVariable("Path", "$UserPath;$InstallDir", "User")
-  Write-Host "Added $InstallDir to your user PATH. Open a new terminal to use agentctl directly."
+
+function Add-AgentctlPath {
+  param([string]$Dir)
+  if (-not $Dir) { return }
+  $expanded = [Environment]::ExpandEnvironmentVariables($Dir)
+  if (-not (Test-Path $expanded)) { return }
+
+  $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
+  $userParts = @()
+  if ($UserPath) { $userParts = $UserPath -split ';' | Where-Object { $_ } }
+  $inUserPath = $false
+  foreach ($part in $userParts) {
+    if ($part.TrimEnd('\\') -ieq $expanded.TrimEnd('\\')) { $inUserPath = $true; break }
+  }
+  if (-not $inUserPath) {
+    $newUserPath = if ($UserPath) { "$UserPath;$expanded" } else { $expanded }
+    [Environment]::SetEnvironmentVariable("Path", $newUserPath, "User")
+    Write-Host "Added $expanded to your user PATH."
+  }
+
+  $processParts = @()
+  if ($env:PATH) { $processParts = $env:PATH -split ';' | Where-Object { $_ } }
+  $inProcessPath = $false
+  foreach ($part in $processParts) {
+    if ($part.TrimEnd('\\') -ieq $expanded.TrimEnd('\\')) { $inProcessPath = $true; break }
+  }
+  if (-not $inProcessPath) {
+    $env:PATH = "$expanded;$env:PATH"
+    Write-Host "Added $expanded to this PowerShell session PATH."
+  }
 }
 
-if ($env:PATH -notlike "*$InstallDir*") {
-  $env:PATH = "$InstallDir;$env:PATH"
-}
+Add-AgentctlPath $InstallDir
+Add-AgentctlPath (Join-Path $env:APPDATA "npm")
+Add-AgentctlPath (Join-Path $env:USERPROFILE ".local\bin")
+Add-AgentctlPath (Join-Path $env:LOCALAPPDATA "Programs\AionUi")
 
 & $OutFile status
