@@ -1,6 +1,10 @@
 package agents
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestSupportedAgentsIncludesInitialFour(t *testing.T) {
 	got := Supported()
@@ -50,6 +54,43 @@ func TestWindowsSupportFlagsReflectCatalog(t *testing.T) {
 	assertSupport(t, statuses, "claude", true, true)
 	assertSupport(t, statuses, "openclaw", true, true)
 	assertSupport(t, statuses, "codex", true, true)
+}
+
+func TestWindowsDetectionFindsClaudeInLocalBinWhenPathIsStale(t *testing.T) {
+	tempHome := t.TempDir()
+	t.Setenv("USERPROFILE", tempHome)
+	t.Setenv("APPDATA", filepath.Join(tempHome, "AppData", "Roaming"))
+
+	claudePath := filepath.Join(tempHome, ".local", "bin", "claude.exe")
+	if err := os.MkdirAll(filepath.Dir(claudePath), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(claudePath, []byte("stub"), 0o755); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	lookup := func(name string) (string, error) {
+		return "", ErrNotFound
+	}
+	runner := func(name string, args ...string) (string, error) {
+		return "2.1.126 (Claude Code)\n", nil
+	}
+
+	agent, ok := Find("claude")
+	if !ok {
+		t.Fatal("Find(claude) = false")
+	}
+	status := CheckAgent(PlatformWindows, agent, lookup, runner)
+
+	if status.State != "installed" {
+		t.Fatalf("status.State = %q, want installed", status.State)
+	}
+	if status.Path != claudePath {
+		t.Fatalf("status.Path = %q, want %q", status.Path, claudePath)
+	}
+	if status.Version != "2.1.126 (Claude Code)" {
+		t.Fatalf("status.Version = %q", status.Version)
+	}
 }
 
 func assertStatusState(t *testing.T, statuses []Status, name string, want string) {

@@ -3,7 +3,9 @@ package agents
 import (
 	"bytes"
 	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -296,7 +298,7 @@ func CheckAllForPlatform(platform Platform, lookup LookupFunc, runner RunnerFunc
 }
 
 func CheckAgent(platform Platform, agent Agent, lookup LookupFunc, runner RunnerFunc) Status {
-	path, err := lookup(agent.Executable)
+	path, err := resolveExecutablePath(platform, agent, lookup)
 	status := Status{Name: agent.Name, State: "installed", Path: path}
 	if err != nil || path == "" {
 		status.State = "missing"
@@ -320,6 +322,25 @@ func CheckAgent(platform Platform, agent Agent, lookup LookupFunc, runner Runner
 	return status
 }
 
+func resolveExecutablePath(platform Platform, agent Agent, lookup LookupFunc) (string, error) {
+	if lookup == nil {
+		return "", ErrNotFound
+	}
+	path, err := lookup(agent.Executable)
+	if err == nil && path != "" {
+		return path, nil
+	}
+	if platform != PlatformWindows {
+		return path, err
+	}
+	for _, candidate := range windowsExecutableCandidates(agent) {
+		if fileExists(candidate) {
+			return candidate, nil
+		}
+	}
+	return path, err
+}
+
 func defaultRunner(name string, args ...string) (string, error) {
 	cmd := exec.Command(name, args...)
 	var stdout bytes.Buffer
@@ -336,6 +357,37 @@ func defaultRunner(name string, args ...string) (string, error) {
 		return "", err
 	}
 	return stdout.String(), nil
+}
+
+func windowsExecutableCandidates(agent Agent) []string {
+	appData := strings.TrimSpace(os.Getenv("APPDATA"))
+	userProfile := strings.TrimSpace(os.Getenv("USERPROFILE"))
+	candidates := make([]string, 0, 8)
+
+	if appData != "" {
+		npmDir := filepath.Join(appData, "npm")
+		candidates = append(candidates,
+			filepath.Join(npmDir, agent.Executable),
+			filepath.Join(npmDir, agent.Executable+".cmd"),
+			filepath.Join(npmDir, agent.Executable+".ps1"),
+			filepath.Join(npmDir, agent.Executable+".exe"),
+		)
+	}
+	if userProfile != "" {
+		localBin := filepath.Join(userProfile, ".local", "bin")
+		candidates = append(candidates,
+			filepath.Join(localBin, agent.Executable),
+			filepath.Join(localBin, agent.Executable+".cmd"),
+			filepath.Join(localBin, agent.Executable+".ps1"),
+			filepath.Join(localBin, agent.Executable+".exe"),
+		)
+	}
+	return candidates
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
 
 func firstMeaningfulLine(raw string) string {
