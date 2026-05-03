@@ -34,6 +34,45 @@ go build -o bin/agentctl ./cmd/agentctl
 ./bin/agentctl setup
 ```
 
+## Agent skill
+
+This repo includes a reusable skill for AI agents that need to install or use `agentctl`:
+
+```text
+skills/agentctl/SKILL.md
+```
+
+Before asking an agent to install or manage local agent tools, have it read the bundled skill from the repo or raw URL:
+
+```text
+https://raw.githubusercontent.com/setuplinux/agentctl/main/skills/agentctl/SKILL.md
+```
+
+The skill teaches the agent how to install `agentctl` on Linux, macOS, or Windows, then how to run safe first checks, targeted install/update/uninstall commands, and verification steps.
+
+Hermes example:
+
+```bash
+mkdir -p ~/.hermes/skills/local/agentctl
+curl -fsSL https://raw.githubusercontent.com/setuplinux/agentctl/main/skills/agentctl/SKILL.md \
+  -o ~/.hermes/skills/local/agentctl/SKILL.md
+```
+
+Claude Code-style example:
+
+```bash
+mkdir -p ~/.claude/skills/agentctl
+curl -fsSL https://raw.githubusercontent.com/setuplinux/agentctl/main/skills/agentctl/SKILL.md \
+  -o ~/.claude/skills/agentctl/SKILL.md
+```
+
+Local checkout copy example:
+
+```bash
+mkdir -p ~/.hermes/skills/local/agentctl
+cp skills/agentctl/SKILL.md ~/.hermes/skills/local/agentctl/SKILL.md
+```
+
 ## Commands
 
 ```bash
