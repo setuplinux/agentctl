@@ -54,6 +54,27 @@ else
 fi
 `
 
+const aionUiWindowsInstallScript = `
+$ErrorActionPreference = "Stop"
+$winget = Get-Command winget -ErrorAction SilentlyContinue
+if ($winget) {
+  winget install --id iOfficeAI.AionUi --exact --accept-package-agreements --accept-source-agreements
+  if ($LASTEXITCODE -eq 0) { exit 0 }
+  Write-Host "winget package iOfficeAI.AionUi was not installable; falling back to GitHub release installer..."
+}
+$arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
+$release = Invoke-RestMethod -Headers @{"User-Agent"="agentctl"} -Uri "https://api.github.com/repos/iOfficeAI/AionUi/releases/latest"
+$suffix = "win-$arch.exe"
+$asset = $release.assets | Where-Object { $_.name.EndsWith($suffix) } | Select-Object -First 1
+if (-not $asset) { throw "No AionUi release asset ending with $suffix" }
+$installer = Join-Path $env:TEMP $asset.name
+Write-Host "download: $($asset.browser_download_url)"
+Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $installer
+Write-Host "install: $installer /S"
+$process = Start-Process -FilePath $installer -ArgumentList "/S" -Wait -PassThru
+exit $process.ExitCode
+`
+
 type Platform string
 
 const (
@@ -341,12 +362,12 @@ func Supported() []Agent {
 				},
 				PlatformWindows: {
 					Install: &CommandSpec{
-						Program: "winget",
-						Args:    []string{"install", "--id", "iOfficeAI.AionUi", "--exact", "--accept-package-agreements", "--accept-source-agreements"},
+						Program: "powershell",
+						Args:    []string{"-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", aionUiWindowsInstallScript},
 					},
 					Update: &CommandSpec{
-						Program: "winget",
-						Args:    []string{"upgrade", "--id", "iOfficeAI.AionUi", "--exact", "--accept-package-agreements", "--accept-source-agreements"},
+						Program: "powershell",
+						Args:    []string{"-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", aionUiWindowsInstallScript},
 					},
 					FirstRunHint: "Launch AionUi after install; it auto-detects installed ACP/CLI agents such as Hermes, OpenClaw, Claude Code, Codex, Qwen, and OpenCode.",
 					Notes: []string{
