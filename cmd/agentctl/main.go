@@ -15,6 +15,8 @@ import (
 	"github.com/setuplinux/agentctl/internal/agents"
 )
 
+var version = "dev"
+
 func main() {
 	os.Exit(Run(os.Args[1:], os.Stdout, os.Stderr))
 }
@@ -38,6 +40,10 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 		return runDoctor(args[1:], stdout, stderr)
 	case "update":
 		return runUpdate(args[1:], stdout, stderr)
+	case "uninstall", "remove":
+		return runUninstall(args[1:], stdout, stderr)
+	case "version", "--version", "-v":
+		return runVersion(stdout)
 	case "fix":
 		return runFix(args[1:], stdout, stderr)
 	case "logs":
@@ -72,12 +78,15 @@ func runStatus(stdout io.Writer) int {
 	platform := agents.PlatformFromGOOS(runtime.GOOS)
 	fmt.Fprintf(stdout, "Agent status (%s):\n", platform)
 	for _, status := range agents.CheckAllForPlatform(platform, exec.LookPath, captureCommandOutput) {
-		flags := make([]string, 0, 2)
+		flags := make([]string, 0, 3)
 		if status.SupportsInstall {
 			flags = append(flags, "install")
 		}
 		if status.SupportsUpdate {
 			flags = append(flags, "update")
+		}
+		if status.SupportsUninstall {
+			flags = append(flags, "uninstall")
 		}
 		capabilityLabel := ""
 		if len(flags) > 0 {
@@ -135,6 +144,23 @@ func runUpdate(args []string, stdout io.Writer, stderr io.Writer) int {
 		return openClawUpdate(stdout, stderr)
 	}
 	return runGenericAgentUpdate(name, stdout, stderr)
+}
+
+func runUninstall(args []string, stdout io.Writer, stderr io.Writer) int {
+	name := agentName(args)
+	if name == "" {
+		fmt.Fprintf(stderr, "usage: agentctl uninstall <agent|all>\n")
+		return 2
+	}
+	if name == "all" {
+		return runUninstallAll(stdout, stderr)
+	}
+	return runGenericAgentUninstall(name, stdout, stderr)
+}
+
+func runVersion(stdout io.Writer) int {
+	fmt.Fprintf(stdout, "agentctl %s\n", version)
+	return 0
 }
 
 func runFix(args []string, stdout io.Writer, stderr io.Writer) int {
@@ -283,6 +309,47 @@ func runUpdateAll(stdout io.Writer, stderr io.Writer) int {
 		}
 	}
 	return code
+}
+
+func runUninstallAll(stdout io.Writer, stderr io.Writer) int {
+	platform := agents.PlatformFromGOOS(runtime.GOOS)
+	statuses := agents.CheckAllForPlatform(platform, exec.LookPath, captureCommandOutput)
+	code := 0
+	for _, status := range statuses {
+		if status.State != "installed" {
+			fmt.Fprintf(stdout, "skip: %s missing\n", status.Name)
+			continue
+		}
+		if !status.SupportsUninstall {
+			fmt.Fprintf(stdout, "skip: %s has no managed uninstall path on %s\n", status.Name, platform)
+			continue
+		}
+		if runGenericAgentUninstall(status.Name, stdout, stderr) != 0 {
+			code = 1
+		}
+	}
+	return code
+}
+
+func runGenericAgentUninstall(name string, stdout io.Writer, stderr io.Writer) int {
+	agent, ok := agents.Find(name)
+	if !ok {
+		fmt.Fprintf(stderr, "unknown agent: %s\n", name)
+		return 2
+	}
+	platform := agents.PlatformFromGOOS(runtime.GOOS)
+	support, ok := agent.Platforms[platform]
+	if !ok || support.Uninstall == nil {
+		fmt.Fprintf(stderr, "uninstall is not supported for %s on %s\n", agent.Name, platform)
+		return 2
+	}
+	status := agents.CheckAgent(platform, agent, exec.LookPath, captureCommandOutput)
+	if status.State != "installed" || status.Path == "" {
+		fmt.Fprintf(stdout, "skip: %s is not installed\n", agent.Name)
+		return 0
+	}
+	fmt.Fprintf(stdout, "== Uninstall %s ==\n", titleCase(agent.Name))
+	return runCommandSpec(stdout, stderr, 20*time.Minute, support.Uninstall)
 }
 
 func runGenericAgentUpdate(name string, stdout io.Writer, stderr io.Writer) int {
@@ -895,7 +962,16 @@ func printHelp(w io.Writer) {
 	fmt.Fprintln(w, "  agentctl setup")
 	fmt.Fprintln(w, "  agentctl doctor <agent|all>")
 	fmt.Fprintln(w, "  agentctl update <agent|all>")
+	fmt.Fprintln(w, "  agentctl uninstall <agent|all>")
+	fmt.Fprintln(w, "  agentctl version")
 	fmt.Fprintln(w, "  agentctl fix openclaw")
 	fmt.Fprintln(w, "  agentctl logs openclaw")
 	fmt.Fprintln(w, "  agentctl rollback openclaw")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Examples:")
+	fmt.Fprintln(w, "  agentctl status")
+	fmt.Fprintln(w, "  agentctl install aionui")
+	fmt.Fprintln(w, "  agentctl update all")
+	fmt.Fprintln(w, "  agentctl uninstall codex")
+	fmt.Fprintln(w, "  agentctl doctor openclaw")
 }

@@ -42,6 +42,9 @@ func TestAionUiLinuxSupportInstallsAndUpdatesFromLatestDeb(t *testing.T) {
 	if support.Update == nil {
 		t.Fatal("AionUi Linux update command is nil")
 	}
+	if support.Uninstall == nil {
+		t.Fatal("AionUi Linux uninstall command is nil")
+	}
 	install := support.Install.Program + " " + strings.Join(support.Install.Args, " ")
 	update := support.Update.Program + " " + strings.Join(support.Update.Args, " ")
 	for _, command := range []string{install, update} {
@@ -49,6 +52,12 @@ func TestAionUiLinuxSupportInstallsAndUpdatesFromLatestDeb(t *testing.T) {
 			if !strings.Contains(command, want) {
 				t.Fatalf("AionUi command missing %q: %s", want, command)
 			}
+		}
+	}
+	uninstall := support.Uninstall.Program + " " + strings.Join(support.Uninstall.Args, " ")
+	for _, want := range []string{"apt-get", "remove", "aionui"} {
+		if !strings.Contains(uninstall, want) {
+			t.Fatalf("AionUi Linux uninstall command missing %q: %s", want, uninstall)
 		}
 	}
 }
@@ -68,11 +77,30 @@ func TestAionUiWindowsSupportInstallsAndUpdatesWithWinget(t *testing.T) {
 	if support.Update == nil {
 		t.Fatal("AionUi Windows update command is nil")
 	}
+	if support.Uninstall == nil {
+		t.Fatal("AionUi Windows uninstall command is nil")
+	}
 	for label, spec := range map[string]*CommandSpec{"install": support.Install, "update": support.Update} {
 		command := spec.Program + " " + strings.Join(spec.Args, " ")
 		for _, want := range []string{"winget", "iOfficeAI.AionUi", "--accept-package-agreements", "--accept-source-agreements", "api.github.com/repos/iOfficeAI/AionUi/releases/latest", "win-$arch.exe", "/S", "Programs\\AionUi", "SetEnvironmentVariable"} {
 			if !strings.Contains(command, want) {
 				t.Fatalf("AionUi Windows %s command missing %q: %s", label, want, command)
+			}
+		}
+	}
+	uninstall := support.Uninstall.Program + " " + strings.Join(support.Uninstall.Args, " ")
+	for _, want := range []string{"winget", "uninstall", "iOfficeAI.AionUi", "Uninstall AionUi.exe", "/S"} {
+		if !strings.Contains(uninstall, want) {
+			t.Fatalf("AionUi Windows uninstall command missing %q: %s", want, uninstall)
+		}
+	}
+}
+
+func TestEveryAgentInstallSupportHasUninstall(t *testing.T) {
+	for _, agent := range Supported() {
+		for platform, support := range agent.Platforms {
+			if support.Install != nil && support.Uninstall == nil {
+				t.Fatalf("%s has install support on %s but no uninstall command", agent.Name, platform)
 			}
 		}
 	}

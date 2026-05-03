@@ -11,6 +11,85 @@ import (
 
 var ErrNotFound = errors.New("agent executable not found")
 
+const aionUiLinuxUninstallScript = `
+set -euo pipefail
+if [ "$(id -u)" -eq 0 ]; then
+  apt-get remove -y aionui
+elif command -v sudo >/dev/null 2>&1; then
+  sudo apt-get remove -y aionui
+else
+  echo "AionUi uninstall requires root or sudo" >&2
+  exit 1
+fi
+`
+
+const aionUiWindowsUninstallScript = `
+$ErrorActionPreference = "Stop"
+$winget = Get-Command winget -ErrorAction SilentlyContinue
+if ($winget) {
+  winget uninstall --id iOfficeAI.AionUi --exact --accept-source-agreements
+  if ($LASTEXITCODE -eq 0) { exit 0 }
+  Write-Host "winget uninstall iOfficeAI.AionUi failed; trying local uninstaller..."
+}
+$candidates = @()
+foreach ($root in @($env:LOCALAPPDATA, $env:ProgramFiles, ${env:ProgramFiles(x86)})) {
+  if ($root) { $candidates += Join-Path $root "Programs\AionUi\Uninstall AionUi.exe" }
+  if ($root) { $candidates += Join-Path $root "AionUi\Uninstall AionUi.exe" }
+}
+$candidates = $candidates | Where-Object { $_ -and (Test-Path $_) }
+if (-not $candidates) { throw "AionUi uninstaller not found" }
+$uninstaller = $candidates | Select-Object -First 1
+Write-Host "uninstall: $uninstaller /S"
+$process = Start-Process -FilePath $uninstaller -ArgumentList "/S" -Wait -PassThru
+exit $process.ExitCode
+`
+
+const npmUninstallCodexScript = `npm uninstall -g @openai/codex`
+
+const claudeUnixUninstallScript = `
+set -euo pipefail
+if command -v claude >/dev/null 2>&1; then
+  claude uninstall || true
+fi
+if command -v npm >/dev/null 2>&1; then
+  npm uninstall -g @anthropic-ai/claude-code || true
+fi
+rm -f "$HOME/.local/bin/claude" "$HOME/.local/bin/claude.exe" "$HOME/.local/bin/claude.cmd" "$HOME/.local/bin/claude.ps1"
+`
+
+const claudeWindowsUninstallScript = `
+$ErrorActionPreference = "Continue"
+$claude = Get-Command claude -ErrorAction SilentlyContinue
+if ($claude) { claude uninstall }
+$npm = Get-Command npm -ErrorAction SilentlyContinue
+if ($npm) { npm uninstall -g @anthropic-ai/claude-code }
+$localBin = Join-Path $env:USERPROFILE ".local\bin"
+@("claude.exe", "claude.cmd", "claude.ps1", "claude") | ForEach-Object {
+  $path = Join-Path $localBin $_
+  if (Test-Path $path) { Remove-Item -Force $path }
+}
+exit 0
+`
+
+const openClawUninstallScript = `
+set -euo pipefail
+if command -v openclaw >/dev/null 2>&1; then
+  openclaw uninstall --service --yes --non-interactive || true
+fi
+if command -v npm >/dev/null 2>&1; then
+  npm uninstall -g openclaw || true
+fi
+`
+
+const openClawWindowsUninstallScript = `
+$ErrorActionPreference = "Continue"
+$openclaw = Get-Command openclaw -ErrorAction SilentlyContinue
+if ($openclaw) { openclaw uninstall --service --yes --non-interactive }
+$npm = Get-Command npm -ErrorAction SilentlyContinue
+if ($npm) { npm uninstall -g openclaw }
+exit 0
+`
+
 const aionUiLinuxDebInstallScript = `
 set -euo pipefail
 need() { command -v "$1" >/dev/null 2>&1 || { echo "missing required command: $1" >&2; exit 1; }; }
@@ -109,6 +188,7 @@ type CommandSpec struct {
 type PlatformSupport struct {
 	Install      *CommandSpec
 	Update       *CommandSpec
+	Uninstall    *CommandSpec
 	Doctor       *CommandSpec
 	FirstRunHint string
 	Notes        []string
@@ -123,15 +203,16 @@ type Agent struct {
 }
 
 type Status struct {
-	Name            string
-	State           string
-	Path            string
-	Version         string
-	SupportsInstall bool
-	SupportsUpdate  bool
-	SupportsDoctor  bool
-	FirstRunHint    string
-	Notes           []string
+	Name              string
+	State             string
+	Path              string
+	Version           string
+	SupportsInstall   bool
+	SupportsUpdate    bool
+	SupportsUninstall bool
+	SupportsDoctor    bool
+	FirstRunHint      string
+	Notes             []string
 }
 
 type LookupFunc func(name string) (string, error)
@@ -167,6 +248,10 @@ func Supported() []Agent {
 						Program: "hermes",
 						Args:    []string{"update"},
 					},
+					Uninstall: &CommandSpec{
+						Program: "hermes",
+						Args:    []string{"uninstall", "--yes"},
+					},
 					Doctor: &CommandSpec{
 						Program: "hermes",
 						Args:    []string{"doctor"},
@@ -184,6 +269,10 @@ func Supported() []Agent {
 					Update: &CommandSpec{
 						Program: "hermes",
 						Args:    []string{"update"},
+					},
+					Uninstall: &CommandSpec{
+						Program: "hermes",
+						Args:    []string{"uninstall", "--yes"},
 					},
 					Doctor: &CommandSpec{
 						Program: "hermes",
@@ -208,6 +297,10 @@ func Supported() []Agent {
 						Program: "openclaw",
 						Args:    []string{"update", "--yes", "--json", "--timeout", "1200"},
 					},
+					Uninstall: &CommandSpec{
+						Program: "bash",
+						Args:    []string{"-lc", openClawUninstallScript},
+					},
 					Doctor: &CommandSpec{
 						Program: "openclaw",
 						Args:    []string{"doctor"},
@@ -223,6 +316,10 @@ func Supported() []Agent {
 						Program: "openclaw",
 						Args:    []string{"update", "--yes", "--json", "--timeout", "1200"},
 					},
+					Uninstall: &CommandSpec{
+						Program: "bash",
+						Args:    []string{"-lc", openClawUninstallScript},
+					},
 					Doctor: &CommandSpec{
 						Program: "openclaw",
 						Args:    []string{"doctor"},
@@ -237,6 +334,10 @@ func Supported() []Agent {
 					Update: &CommandSpec{
 						Program: "openclaw",
 						Args:    []string{"update", "--yes", "--json", "--timeout", "1200"},
+					},
+					Uninstall: &CommandSpec{
+						Program: "powershell",
+						Args:    []string{"-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", openClawWindowsUninstallScript},
 					},
 					Doctor: &CommandSpec{
 						Program: "openclaw",
@@ -264,6 +365,10 @@ func Supported() []Agent {
 						Program: "claude",
 						Args:    []string{"update"},
 					},
+					Uninstall: &CommandSpec{
+						Program: "bash",
+						Args:    []string{"-lc", claudeUnixUninstallScript},
+					},
 					Doctor: &CommandSpec{
 						Program: "claude",
 						Args:    []string{"doctor"},
@@ -279,6 +384,10 @@ func Supported() []Agent {
 						Program: "claude",
 						Args:    []string{"update"},
 					},
+					Uninstall: &CommandSpec{
+						Program: "bash",
+						Args:    []string{"-lc", claudeUnixUninstallScript},
+					},
 					Doctor: &CommandSpec{
 						Program: "claude",
 						Args:    []string{"doctor"},
@@ -293,6 +402,10 @@ func Supported() []Agent {
 					Update: &CommandSpec{
 						Program: "claude",
 						Args:    []string{"update"},
+					},
+					Uninstall: &CommandSpec{
+						Program: "powershell",
+						Args:    []string{"-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", claudeWindowsUninstallScript},
 					},
 					Doctor: &CommandSpec{
 						Program: "claude",
@@ -320,6 +433,10 @@ func Supported() []Agent {
 						Program: "codex",
 						Args:    []string{"--upgrade"},
 					},
+					Uninstall: &CommandSpec{
+						Program: "npm",
+						Args:    []string{"uninstall", "-g", "@openai/codex"},
+					},
 					FirstRunHint: "Run `codex --login` after install.",
 					Notes: []string{
 						"Official Codex CLI supports Linux and macOS. Windows support is still experimental and often works best in WSL.",
@@ -334,6 +451,10 @@ func Supported() []Agent {
 						Program: "codex",
 						Args:    []string{"--upgrade"},
 					},
+					Uninstall: &CommandSpec{
+						Program: "npm",
+						Args:    []string{"uninstall", "-g", "@openai/codex"},
+					},
 					FirstRunHint: "Run `codex --login` after install.",
 				},
 				PlatformWindows: {
@@ -344,6 +465,10 @@ func Supported() []Agent {
 					Update: &CommandSpec{
 						Program: "codex",
 						Args:    []string{"--upgrade"},
+					},
+					Uninstall: &CommandSpec{
+						Program: "npm",
+						Args:    []string{"uninstall", "-g", "@openai/codex"},
 					},
 					FirstRunHint: "Run `codex --login` after install.",
 					Notes: []string{
@@ -366,6 +491,10 @@ func Supported() []Agent {
 						Program: "bash",
 						Args:    []string{"-lc", aionUiLinuxDebInstallScript},
 					},
+					Uninstall: &CommandSpec{
+						Program: "bash",
+						Args:    []string{"-lc", aionUiLinuxUninstallScript},
+					},
 					FirstRunHint: "Launch `AionUi` as a normal desktop user; Electron will not run as root without --no-sandbox, and root GUI app state is not recommended.",
 					Notes: []string{
 						"Linux install/update downloads the latest AionUi .deb from iOfficeAI/AionUi GitHub releases and installs it with apt-get.",
@@ -385,6 +514,10 @@ func Supported() []Agent {
 					Update: &CommandSpec{
 						Program: "powershell",
 						Args:    []string{"-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", aionUiWindowsInstallScript},
+					},
+					Uninstall: &CommandSpec{
+						Program: "powershell",
+						Args:    []string{"-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", aionUiWindowsUninstallScript},
 					},
 					FirstRunHint: "Launch AionUi after install; it auto-detects installed ACP/CLI agents such as Hermes, OpenClaw, Claude Code, Codex, Qwen, and OpenCode.",
 					Notes: []string{
@@ -437,6 +570,7 @@ func CheckAgent(platform Platform, agent Agent, lookup LookupFunc, runner Runner
 	if support, ok := agent.Platforms[platform]; ok {
 		status.SupportsInstall = support.Install != nil
 		status.SupportsUpdate = support.Update != nil
+		status.SupportsUninstall = support.Uninstall != nil
 		status.SupportsDoctor = support.Doctor != nil
 		status.FirstRunHint = support.FirstRunHint
 		status.Notes = append(status.Notes, support.Notes...)

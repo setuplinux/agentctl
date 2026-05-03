@@ -52,6 +52,49 @@ func TestRunUnknownCommandReturnsHelpfulError(t *testing.T) {
 	}
 }
 
+func TestRunVersionPrintsAgentctlVersion(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	exitCode := Run([]string{"version"}, &stdout, &stderr)
+
+	if exitCode != 0 {
+		t.Fatalf("exitCode = %d, want 0; stderr=%s", exitCode, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "agentctl") {
+		t.Fatalf("version output missing agentctl name: %s", out)
+	}
+	if !strings.Contains(out, version) {
+		t.Fatalf("version output missing version %q: %s", version, out)
+	}
+}
+
+func TestRunHelpShowsUsageExamplesAndUninstall(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	exitCode := Run([]string{"help"}, &stdout, &stderr)
+
+	if exitCode != 0 {
+		t.Fatalf("exitCode = %d, want 0; stderr=%s", exitCode, stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{"agentctl uninstall <agent|all>", "agentctl version", "Examples:", "agentctl install aionui", "agentctl update all", "agentctl uninstall codex"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("help output missing %q: %s", want, out)
+		}
+	}
+}
+
+func TestRunUninstallRequiresTarget(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	exitCode := Run([]string{"uninstall"}, &stdout, &stderr)
+
+	if exitCode == 0 {
+		t.Fatalf("exitCode = 0, want nonzero")
+	}
+	if !strings.Contains(stderr.String(), "usage: agentctl uninstall <agent|all>") {
+		t.Fatalf("stderr missing uninstall usage: %s", stderr.String())
+	}
+}
+
 func TestRunRollbackRequiresOpenClawTarget(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	exitCode := Run([]string{"rollback"}, &stdout, &stderr)

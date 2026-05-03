@@ -1,6 +1,6 @@
 # agentctl
 
-One small command to detect, install, update, and manage local AI agent tools like Hermes, OpenClaw, Claude Code, Codex, and AionUi.
+One small command to detect, install, update, uninstall, and manage local AI agent tools like Hermes, OpenClaw, Claude Code, Codex, and AionUi.
 
 ## Status
 
@@ -9,6 +9,7 @@ Early but usable. The current focus is a simple bootstrap flow:
 - detect agents already installed on the machine
 - install missing supported agents for the current OS
 - update installed agents through their official CLI paths
+- uninstall installed agents through their official CLI/package paths where available
 - keep OpenClaw-specific repair and rollback logic for the gateway-heavy case
 
 ## Install agentctl
@@ -42,6 +43,8 @@ agentctl install <agent|all>
 agentctl setup
 agentctl doctor <agent|all>
 agentctl update <agent|all>
+agentctl uninstall <agent|all>
+agentctl version
 agentctl fix openclaw
 agentctl logs openclaw
 agentctl rollback openclaw
@@ -53,6 +56,8 @@ agentctl rollback openclaw
 - `install` runs the official installer path for the target agent on the current platform.
 - `setup` installs only missing agents and skips anything already installed.
 - `update` prefers each agent's own update command instead of replacing upstream lifecycle logic.
+- `uninstall` delegates to each agent's official uninstall command or package-manager removal path where available.
+- `version` prints the `agentctl` binary version. Release builds embed the git tag.
 - `rollback` currently restores OpenClaw config and patched bundle files, not a full prior package version.
 
 ## Platform notes
@@ -61,7 +66,18 @@ agentctl rollback openclaw
 - Claude Code: Linux, macOS, and Windows install/update paths are cataloged.
 - Codex: installs through `npm install -g @openai/codex`; Windows support is still best-effort and often smoother in WSL.
 - Hermes: Linux and macOS install/update paths are cataloged; native Windows is intentionally not auto-installed.
-- AionUi: Linux install/update downloads the latest `.deb` from `iOfficeAI/AionUi` GitHub releases and installs it with `apt-get`; launch Linux AionUi as a normal desktop user, not root. Windows install/update tries `winget install --id iOfficeAI.AionUi` first, then falls back to the latest GitHub `win-x64.exe`/`win-arm64.exe` installer with `/S` and adds `%LOCALAPPDATA%\Programs\AionUi` to the user PATH; macOS is detect-only until app bundle install/update behavior is verified.
+- AionUi: Linux install/update downloads the latest `.deb` from `iOfficeAI/AionUi` GitHub releases and installs it with `apt-get`; Linux uninstall uses `apt-get remove aionui`; launch Linux AionUi as a normal desktop user, not root. Windows install/update tries `winget install --id iOfficeAI.AionUi` first, then falls back to the latest GitHub `win-x64.exe`/`win-arm64.exe` installer with `/S` and adds `%LOCALAPPDATA%\Programs\AionUi` to the user PATH; Windows uninstall tries winget first, then the local `Uninstall AionUi.exe /S`; macOS is detect-only until app bundle install/update behavior is verified.
+
+## Examples
+
+```bash
+agentctl version
+agentctl status
+agentctl install aionui
+agentctl update all
+agentctl uninstall codex
+agentctl doctor openclaw
+```
 
 ## Design
 
