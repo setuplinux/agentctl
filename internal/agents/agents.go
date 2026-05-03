@@ -478,6 +478,65 @@ func Supported() []Agent {
 			},
 		},
 		{
+			Name:        "gemini",
+			Executable:  "gemini",
+			Description: "Google Gemini CLI",
+			VersionArgs: []string{"--version"},
+			Platforms: map[Platform]PlatformSupport{
+				PlatformLinux: {
+					Install: &CommandSpec{
+						Program: "npm",
+						Args:    []string{"install", "-g", "@google/gemini-cli"},
+					},
+					Update: &CommandSpec{
+						Program: "npm",
+						Args:    []string{"install", "-g", "@google/gemini-cli"},
+					},
+					Uninstall: &CommandSpec{
+						Program: "npm",
+						Args:    []string{"uninstall", "-g", "@google/gemini-cli"},
+					},
+					FirstRunHint: "Run `gemini`, then choose a Google authentication method.",
+					Notes: []string{
+						"Official Gemini CLI standard installation uses npm package @google/gemini-cli.",
+					},
+				},
+				PlatformDarwin: {
+					Install: &CommandSpec{
+						Program: "npm",
+						Args:    []string{"install", "-g", "@google/gemini-cli"},
+					},
+					Update: &CommandSpec{
+						Program: "npm",
+						Args:    []string{"install", "-g", "@google/gemini-cli"},
+					},
+					Uninstall: &CommandSpec{
+						Program: "npm",
+						Args:    []string{"uninstall", "-g", "@google/gemini-cli"},
+					},
+					FirstRunHint: "Run `gemini`, then choose a Google authentication method.",
+				},
+				PlatformWindows: {
+					Install: &CommandSpec{
+						Program: "npm",
+						Args:    []string{"install", "-g", "@google/gemini-cli"},
+					},
+					Update: &CommandSpec{
+						Program: "npm",
+						Args:    []string{"install", "-g", "@google/gemini-cli"},
+					},
+					Uninstall: &CommandSpec{
+						Program: "npm",
+						Args:    []string{"uninstall", "-g", "@google/gemini-cli"},
+					},
+					FirstRunHint: "Run `gemini`, then choose a Google authentication method.",
+					Notes: []string{
+						"On Windows, npm usually places the gemini shim under %APPDATA%\\npm.",
+					},
+				},
+			},
+		},
+		{
 			Name:        "aionui",
 			Executable:  "AionUi",
 			Description: "AionUi desktop cowork app for local AI agents",

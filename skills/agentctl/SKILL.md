@@ -7,7 +7,7 @@ description: Use when detecting, installing, updating, uninstalling, or troubles
 
 ## Overview
 
-`agentctl` is a cross-platform CLI for managing local AI agent tools such as Hermes, OpenClaw, Claude Code, Codex, and AionUi.
+`agentctl` is a cross-platform CLI for managing local AI agent tools such as Hermes, OpenClaw, Claude Code, Codex, Gemini CLI, and AionUi.
 
 Use it as the safe first stop for agent inventory, health checks, installs, updates, and uninstalls.
 
@@ -93,6 +93,7 @@ hermes
 openclaw
 claude
 codex
+gemini
 aionui
 ```
 
@@ -111,6 +112,7 @@ agentctl install aionui
 agentctl install openclaw
 agentctl install claude
 agentctl install codex
+agentctl install gemini
 agentctl install hermes
 ```
 

@@ -1,6 +1,6 @@
 # agentctl
 
-One small command to detect, install, update, uninstall, and manage local AI agent tools like Hermes, OpenClaw, Claude Code, Codex, and AionUi.
+One small command to detect, install, update, uninstall, and manage local AI agent tools like Hermes, OpenClaw, Claude Code, Codex, Gemini CLI, and AionUi.
 
 ## Status
 
@@ -81,6 +81,7 @@ agentctl rollback openclaw
 - OpenClaw: Linux, macOS, and Windows install/update paths are cataloged; WSL2 is still the preferred Windows path.
 - Claude Code: Linux, macOS, and Windows install/update paths are cataloged.
 - Codex: installs through `npm install -g @openai/codex`; Windows support is still best-effort and often smoother in WSL.
+- Gemini CLI: installs through the official `npm install -g @google/gemini-cli` package on Linux, macOS, and Windows; run `gemini` after install to authenticate.
 - Hermes: Linux and macOS install/update paths are cataloged; native Windows is intentionally not auto-installed.
 - AionUi: Linux install/update downloads the latest `.deb` from `iOfficeAI/AionUi` GitHub releases and installs it with `apt-get`; Linux uninstall uses `apt-get remove aionui`; launch Linux AionUi as a normal desktop user, not root. Windows install/update tries `winget install --id iOfficeAI.AionUi` first, then falls back to the latest GitHub `win-x64.exe`/`win-arm64.exe` installer with `/S` and adds `%LOCALAPPDATA%\Programs\AionUi` to the user PATH; Windows uninstall tries winget first, then the local `Uninstall AionUi.exe /S`; macOS is detect-only until app bundle install/update behavior is verified.
 
@@ -90,6 +91,7 @@ agentctl rollback openclaw
 agentctl version
 agentctl status
 agentctl install aionui
+agentctl install gemini
 agentctl update all
 agentctl uninstall codex
 agentctl doctor openclaw

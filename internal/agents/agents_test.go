@@ -9,7 +9,7 @@ import (
 
 func TestSupportedAgentsIncludesCatalogOrder(t *testing.T) {
 	got := Supported()
-	want := []string{"hermes", "openclaw", "claude", "codex", "aionui"}
+	want := []string{"hermes", "openclaw", "claude", "codex", "gemini", "aionui"}
 
 	if len(got) != len(want) {
 		t.Fatalf("Supported() length = %d, want %d (%v)", len(got), len(want), got)
@@ -125,6 +125,7 @@ func TestCheckAllForPlatformMarksInstalledAndMissingAgents(t *testing.T) {
 	assertStatusState(t, statuses, "codex", "installed")
 	assertStatusState(t, statuses, "openclaw", "missing")
 	assertStatusState(t, statuses, "claude", "missing")
+	assertStatusState(t, statuses, "gemini", "missing")
 	assertStatusVersion(t, statuses, "hermes", "hermes 1.2.3")
 	assertStatusVersion(t, statuses, "codex", "codex 1.2.3")
 }
@@ -140,7 +141,39 @@ func TestWindowsSupportFlagsReflectCatalog(t *testing.T) {
 	assertSupport(t, statuses, "claude", true, true)
 	assertSupport(t, statuses, "openclaw", true, true)
 	assertSupport(t, statuses, "codex", true, true)
+	assertSupport(t, statuses, "gemini", true, true)
 	assertSupport(t, statuses, "aionui", true, true)
+}
+
+func TestGeminiSupportUsesOfficialNpmPackage(t *testing.T) {
+	agent, ok := Find("gemini")
+	if !ok {
+		t.Fatal("Find(gemini) = false")
+	}
+	if agent.Executable != "gemini" {
+		t.Fatalf("Executable = %q, want gemini", agent.Executable)
+	}
+	for _, platform := range []Platform{PlatformLinux, PlatformDarwin, PlatformWindows} {
+		support, ok := agent.Platforms[platform]
+		if !ok {
+			t.Fatalf("Gemini missing %s support", platform)
+		}
+		for label, spec := range map[string]*CommandSpec{
+			"install":   support.Install,
+			"update":    support.Update,
+			"uninstall": support.Uninstall,
+		} {
+			if spec == nil {
+				t.Fatalf("Gemini %s %s command is nil", platform, label)
+			}
+			command := spec.Program + " " + strings.Join(spec.Args, " ")
+			for _, want := range []string{"npm", "-g", "@google/gemini-cli"} {
+				if !strings.Contains(command, want) {
+					t.Fatalf("Gemini %s %s command missing %q: %s", platform, label, want, command)
+				}
+			}
+		}
+	}
 }
 
 func TestWindowsDetectionFindsAionUiInLocalAppProgramsWhenPathIsStale(t *testing.T) {
