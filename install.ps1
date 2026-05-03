@@ -31,4 +31,8 @@ if ($UserPath -notlike "*$InstallDir*") {
   Write-Host "Added $InstallDir to your user PATH. Open a new terminal to use agentctl directly."
 }
 
+if ($env:PATH -notlike "*$InstallDir*") {
+  $env:PATH = "$InstallDir;$env:PATH"
+}
+
 & $OutFile status
