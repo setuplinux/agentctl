@@ -3,12 +3,13 @@ package agents
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
-func TestSupportedAgentsIncludesInitialFour(t *testing.T) {
+func TestSupportedAgentsIncludesCatalogOrder(t *testing.T) {
 	got := Supported()
-	want := []string{"hermes", "openclaw", "claude", "codex"}
+	want := []string{"hermes", "openclaw", "claude", "codex", "aionui"}
 
 	if len(got) != len(want) {
 		t.Fatalf("Supported() length = %d, want %d (%v)", len(got), len(want), got)
@@ -16,6 +17,38 @@ func TestSupportedAgentsIncludesInitialFour(t *testing.T) {
 	for i, name := range want {
 		if got[i].Name != name {
 			t.Fatalf("Supported()[%d].Name = %q, want %q", i, got[i].Name, name)
+		}
+	}
+}
+
+func TestAionUiLinuxSupportInstallsAndUpdatesFromLatestDeb(t *testing.T) {
+	agent, ok := Find("aionui")
+	if !ok {
+		t.Fatal("Find(aionui) = false")
+	}
+	if agent.Executable != "AionUi" {
+		t.Fatalf("Executable = %q, want AionUi", agent.Executable)
+	}
+	if len(agent.VersionArgs) != 0 {
+		t.Fatalf("AionUi VersionArgs = %v, want none because Electron --version launches app state", agent.VersionArgs)
+	}
+	support, ok := agent.Platforms[PlatformLinux]
+	if !ok {
+		t.Fatal("AionUi missing Linux support")
+	}
+	if support.Install == nil {
+		t.Fatal("AionUi Linux install command is nil")
+	}
+	if support.Update == nil {
+		t.Fatal("AionUi Linux update command is nil")
+	}
+	install := support.Install.Program + " " + strings.Join(support.Install.Args, " ")
+	update := support.Update.Program + " " + strings.Join(support.Update.Args, " ")
+	for _, command := range []string{install, update} {
+		for _, want := range []string{"api.github.com/repos/iOfficeAI/AionUi/releases/latest", ".deb", "apt-get"} {
+			if !strings.Contains(command, want) {
+				t.Fatalf("AionUi command missing %q: %s", want, command)
+			}
 		}
 	}
 }

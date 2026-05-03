@@ -11,6 +11,49 @@ import (
 
 var ErrNotFound = errors.New("agent executable not found")
 
+const aionUiLinuxDebInstallScript = `
+set -euo pipefail
+need() { command -v "$1" >/dev/null 2>&1 || { echo "missing required command: $1" >&2; exit 1; }; }
+need curl
+need python3
+arch="$(uname -m)"
+case "$arch" in
+  x86_64|amd64) asset_arch="amd64" ;;
+  aarch64|arm64) asset_arch="arm64" ;;
+  *) echo "unsupported AionUi Linux architecture: $arch" >&2; exit 2 ;;
+esac
+asset_url="$({ python3 - "$asset_arch" <<'PY'
+import json, sys, urllib.request
+asset_arch = sys.argv[1]
+req = urllib.request.Request(
+    'https://api.github.com/repos/iOfficeAI/AionUi/releases/latest',
+    headers={'Accept':'application/vnd.github+json','User-Agent':'agentctl'}
+)
+data = json.load(urllib.request.urlopen(req, timeout=30))
+suffix = f'linux-{asset_arch}.deb'
+for asset in data.get('assets', []):
+    if asset.get('name', '').endswith(suffix):
+        print(asset['browser_download_url'])
+        break
+else:
+    raise SystemExit(f'no AionUi release asset ending with {suffix}')
+PY
+} )"
+tmpdir="$(mktemp -d)"
+trap 'rm -rf "$tmpdir"' EXIT
+deb="$tmpdir/aionui.deb"
+echo "download: $asset_url"
+curl -fL "$asset_url" -o "$deb"
+if [ "$(id -u)" -eq 0 ]; then
+  apt-get install -y "$deb"
+elif command -v sudo >/dev/null 2>&1; then
+  sudo apt-get install -y "$deb"
+else
+  echo "AionUi .deb downloaded to $deb but installing requires root or sudo" >&2
+  exit 1
+fi
+`
+
 type Platform string
 
 const (
@@ -267,6 +310,39 @@ func Supported() []Agent {
 					FirstRunHint: "Run `codex --login` after install.",
 					Notes: []string{
 						"Official Windows support is still experimental; WSL is often the safer route for coding workflows.",
+					},
+				},
+			},
+		},
+		{
+			Name:        "aionui",
+			Executable:  "AionUi",
+			Description: "AionUi desktop cowork app for local AI agents",
+			Platforms: map[Platform]PlatformSupport{
+				PlatformLinux: {
+					Install: &CommandSpec{
+						Program: "bash",
+						Args:    []string{"-lc", aionUiLinuxDebInstallScript},
+					},
+					Update: &CommandSpec{
+						Program: "bash",
+						Args:    []string{"-lc", aionUiLinuxDebInstallScript},
+					},
+					FirstRunHint: "Launch `AionUi`; it auto-detects installed ACP/CLI agents such as Hermes, OpenClaw, Claude Code, Codex, Qwen, and OpenCode.",
+					Notes: []string{
+						"Linux install/update downloads the latest AionUi .deb from iOfficeAI/AionUi GitHub releases and installs it with apt-get.",
+					},
+				},
+				PlatformDarwin: {
+					FirstRunHint: "Install the latest AionUi .dmg/.zip from https://github.com/iOfficeAI/AionUi/releases, then launch AionUi from /Applications.",
+					Notes: []string{
+						"macOS AionUi is currently detect-only in agentctl; app bundle install/update is left to AionUi's Electron updater or manual GitHub release install.",
+					},
+				},
+				PlatformWindows: {
+					FirstRunHint: "Install the latest AionUi Windows installer from https://github.com/iOfficeAI/AionUi/releases.",
+					Notes: []string{
+						"Windows AionUi is currently detect-only in agentctl; installer/update behavior should be verified before enabling unattended NSIS installs.",
 					},
 				},
 			},
