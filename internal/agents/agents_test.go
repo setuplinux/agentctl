@@ -145,6 +145,18 @@ func TestWindowsSupportFlagsReflectCatalog(t *testing.T) {
 	assertSupport(t, statuses, "aionui", true, true)
 }
 
+func TestWindowsInstallsDoNotAssumeNpmIsAlreadyInstalled(t *testing.T) {
+	for _, agent := range Supported() {
+		support, ok := agent.Platforms[PlatformWindows]
+		if !ok || support.Install == nil {
+			continue
+		}
+		if support.Install.Program == "npm" {
+			t.Fatalf("%s Windows install calls npm directly; use windowsNpmInstallSpec so clean Windows can bootstrap Node.js first", agent.Name)
+		}
+	}
+}
+
 func TestGeminiSupportUsesOfficialNpmPackage(t *testing.T) {
 	agent, ok := Find("gemini")
 	if !ok {
