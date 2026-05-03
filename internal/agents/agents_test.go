@@ -176,6 +176,51 @@ func TestGeminiSupportUsesOfficialNpmPackage(t *testing.T) {
 	}
 }
 
+func TestWindowsNpmBackedInstallsBootstrapNodeWithWinget(t *testing.T) {
+	for name, packageName := range map[string]string{
+		"codex":  "@openai/codex",
+		"gemini": "@google/gemini-cli",
+	} {
+		agent, ok := Find(name)
+		if !ok {
+			t.Fatalf("Find(%s) = false", name)
+		}
+		support, ok := agent.Platforms[PlatformWindows]
+		if !ok {
+			t.Fatalf("%s missing Windows support", name)
+		}
+		if support.Install == nil {
+			t.Fatalf("%s Windows install command is nil", name)
+		}
+		command := support.Install.Program + " " + strings.Join(support.Install.Args, " ")
+		for _, want := range []string{"powershell", "winget install", "OpenJS.NodeJS.LTS", "npm", "install", "-g", packageName} {
+			if !strings.Contains(command, want) {
+				t.Fatalf("%s Windows install command missing %q: %s", name, want, command)
+			}
+		}
+	}
+}
+
+func TestGeminiWindowsUpdateAlsoBootstrapsNodeWithWinget(t *testing.T) {
+	agent, ok := Find("gemini")
+	if !ok {
+		t.Fatal("Find(gemini) = false")
+	}
+	support, ok := agent.Platforms[PlatformWindows]
+	if !ok {
+		t.Fatal("Gemini missing Windows support")
+	}
+	if support.Update == nil {
+		t.Fatal("Gemini Windows update command is nil")
+	}
+	command := support.Update.Program + " " + strings.Join(support.Update.Args, " ")
+	for _, want := range []string{"powershell", "winget install", "OpenJS.NodeJS.LTS", "npm", "install", "-g", "@google/gemini-cli"} {
+		if !strings.Contains(command, want) {
+			t.Fatalf("Gemini Windows update command missing %q: %s", want, command)
+		}
+	}
+}
+
 func TestWindowsDetectionFindsAionUiInLocalAppProgramsWhenPathIsStale(t *testing.T) {
 	tempHome := t.TempDir()
 	t.Setenv("LOCALAPPDATA", filepath.Join(tempHome, "AppData", "Local"))

@@ -194,6 +194,8 @@ Do not use `AionUi --version` for status checks; Electron may launch app behavio
 
 `install.ps1` installs `agentctl.exe` under the user profile and updates user/current-session PATH where possible.
 
+On a clean Windows install, `agentctl.exe` itself does not require Node.js or npm. Agents installed through npm packages, such as Codex and Gemini CLI, need npm; `agentctl install codex` and `agentctl install gemini` try to install Node.js LTS with `winget` first when npm is missing.
+
 AionUi may install to:
 
 ```text

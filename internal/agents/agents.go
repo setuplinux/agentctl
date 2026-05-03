@@ -171,6 +171,47 @@ if (($env:PATH -split ';') -notcontains $installDir) {
 exit 0
 `
 
+const windowsNpmInstallScriptTemplate = `
+$ErrorActionPreference = "Stop"
+$package = "__PACKAGE__"
+
+function Add-ProcessPath {
+  param([string]$Dir)
+  if (-not $Dir) { return }
+  $expanded = [Environment]::ExpandEnvironmentVariables($Dir)
+  if (-not (Test-Path $expanded)) { return }
+  $parts = @()
+  if ($env:PATH) { $parts = $env:PATH -split ';' | Where-Object { $_ } }
+  foreach ($part in $parts) {
+    if ($part.TrimEnd('\') -ieq $expanded.TrimEnd('\')) { return }
+  }
+  $env:PATH = "$expanded;$env:PATH"
+}
+
+Add-ProcessPath (Join-Path $env:ProgramFiles "nodejs")
+Add-ProcessPath (Join-Path $env:APPDATA "npm")
+$npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
+if (-not $npm) { $npm = Get-Command npm -ErrorAction SilentlyContinue }
+if (-not $npm) {
+  $winget = Get-Command winget -ErrorAction SilentlyContinue
+  if (-not $winget) {
+    throw "npm is required to install $package. Install Node.js LTS from https://nodejs.org/ or install winget, then rerun agentctl."
+  }
+  Write-Host "npm was not found; installing Node.js LTS with winget..."
+  winget install --id OpenJS.NodeJS.LTS --exact --source winget --accept-package-agreements --accept-source-agreements
+  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  Add-ProcessPath (Join-Path $env:ProgramFiles "nodejs")
+  Add-ProcessPath (Join-Path $env:APPDATA "npm")
+  $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
+  if (-not $npm) { $npm = Get-Command npm -ErrorAction SilentlyContinue }
+}
+if (-not $npm) {
+  throw "Node.js was installed, but npm is not visible in this PowerShell session. Open a new terminal and rerun agentctl."
+}
+& $npm.Path install -g $package
+exit $LASTEXITCODE
+`
+
 type Platform string
 
 const (
@@ -228,6 +269,33 @@ func PlatformFromGOOS(goos string) Platform {
 		return PlatformDarwin
 	default:
 		return PlatformUnknown
+	}
+}
+
+func npmInstallSpec(packageName string) *CommandSpec {
+	return &CommandSpec{
+		Program: "npm",
+		Args:    []string{"install", "-g", packageName},
+	}
+}
+
+func npmUninstallSpec(packageName string) *CommandSpec {
+	return &CommandSpec{
+		Program: "npm",
+		Args:    []string{"uninstall", "-g", packageName},
+	}
+}
+
+func windowsNpmInstallSpec(packageName string) *CommandSpec {
+	return &CommandSpec{
+		Program: "powershell",
+		Args: []string{
+			"-NoProfile",
+			"-ExecutionPolicy",
+			"Bypass",
+			"-Command",
+			strings.ReplaceAll(windowsNpmInstallScriptTemplate, "__PACKAGE__", packageName),
+		},
 	}
 }
 
@@ -425,54 +493,37 @@ func Supported() []Agent {
 			VersionArgs: []string{"--version"},
 			Platforms: map[Platform]PlatformSupport{
 				PlatformLinux: {
-					Install: &CommandSpec{
-						Program: "npm",
-						Args:    []string{"install", "-g", "@openai/codex"},
-					},
+					Install: npmInstallSpec("@openai/codex"),
 					Update: &CommandSpec{
 						Program: "codex",
 						Args:    []string{"--upgrade"},
 					},
-					Uninstall: &CommandSpec{
-						Program: "npm",
-						Args:    []string{"uninstall", "-g", "@openai/codex"},
-					},
+					Uninstall:    npmUninstallSpec("@openai/codex"),
 					FirstRunHint: "Run `codex --login` after install.",
 					Notes: []string{
 						"Official Codex CLI supports Linux and macOS. Windows support is still experimental and often works best in WSL.",
 					},
 				},
 				PlatformDarwin: {
-					Install: &CommandSpec{
-						Program: "npm",
-						Args:    []string{"install", "-g", "@openai/codex"},
-					},
+					Install: npmInstallSpec("@openai/codex"),
 					Update: &CommandSpec{
 						Program: "codex",
 						Args:    []string{"--upgrade"},
 					},
-					Uninstall: &CommandSpec{
-						Program: "npm",
-						Args:    []string{"uninstall", "-g", "@openai/codex"},
-					},
+					Uninstall:    npmUninstallSpec("@openai/codex"),
 					FirstRunHint: "Run `codex --login` after install.",
 				},
 				PlatformWindows: {
-					Install: &CommandSpec{
-						Program: "npm",
-						Args:    []string{"install", "-g", "@openai/codex"},
-					},
+					Install: windowsNpmInstallSpec("@openai/codex"),
 					Update: &CommandSpec{
 						Program: "codex",
 						Args:    []string{"--upgrade"},
 					},
-					Uninstall: &CommandSpec{
-						Program: "npm",
-						Args:    []string{"uninstall", "-g", "@openai/codex"},
-					},
+					Uninstall:    npmUninstallSpec("@openai/codex"),
 					FirstRunHint: "Run `codex --login` after install.",
 					Notes: []string{
 						"Official Windows support is still experimental; WSL is often the safer route for coding workflows.",
+						"If npm is missing, agentctl install codex tries to install Node.js LTS with winget first.",
 					},
 				},
 			},
@@ -484,54 +535,28 @@ func Supported() []Agent {
 			VersionArgs: []string{"--version"},
 			Platforms: map[Platform]PlatformSupport{
 				PlatformLinux: {
-					Install: &CommandSpec{
-						Program: "npm",
-						Args:    []string{"install", "-g", "@google/gemini-cli"},
-					},
-					Update: &CommandSpec{
-						Program: "npm",
-						Args:    []string{"install", "-g", "@google/gemini-cli"},
-					},
-					Uninstall: &CommandSpec{
-						Program: "npm",
-						Args:    []string{"uninstall", "-g", "@google/gemini-cli"},
-					},
+					Install:      npmInstallSpec("@google/gemini-cli"),
+					Update:       npmInstallSpec("@google/gemini-cli"),
+					Uninstall:    npmUninstallSpec("@google/gemini-cli"),
 					FirstRunHint: "Run `gemini`, then choose a Google authentication method.",
 					Notes: []string{
 						"Official Gemini CLI standard installation uses npm package @google/gemini-cli.",
 					},
 				},
 				PlatformDarwin: {
-					Install: &CommandSpec{
-						Program: "npm",
-						Args:    []string{"install", "-g", "@google/gemini-cli"},
-					},
-					Update: &CommandSpec{
-						Program: "npm",
-						Args:    []string{"install", "-g", "@google/gemini-cli"},
-					},
-					Uninstall: &CommandSpec{
-						Program: "npm",
-						Args:    []string{"uninstall", "-g", "@google/gemini-cli"},
-					},
+					Install:      npmInstallSpec("@google/gemini-cli"),
+					Update:       npmInstallSpec("@google/gemini-cli"),
+					Uninstall:    npmUninstallSpec("@google/gemini-cli"),
 					FirstRunHint: "Run `gemini`, then choose a Google authentication method.",
 				},
 				PlatformWindows: {
-					Install: &CommandSpec{
-						Program: "npm",
-						Args:    []string{"install", "-g", "@google/gemini-cli"},
-					},
-					Update: &CommandSpec{
-						Program: "npm",
-						Args:    []string{"install", "-g", "@google/gemini-cli"},
-					},
-					Uninstall: &CommandSpec{
-						Program: "npm",
-						Args:    []string{"uninstall", "-g", "@google/gemini-cli"},
-					},
+					Install:      windowsNpmInstallSpec("@google/gemini-cli"),
+					Update:       windowsNpmInstallSpec("@google/gemini-cli"),
+					Uninstall:    npmUninstallSpec("@google/gemini-cli"),
 					FirstRunHint: "Run `gemini`, then choose a Google authentication method.",
 					Notes: []string{
 						"On Windows, npm usually places the gemini shim under %APPDATA%\\npm.",
+						"If npm is missing, agentctl install gemini tries to install Node.js LTS with winget first.",
 					},
 				},
 			},
