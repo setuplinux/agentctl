@@ -1,3 +1,3 @@
-module github.com/keithpettit/agentctl
+module github.com/setuplinux/agentctl
 
 go 1.22

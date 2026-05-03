@@ -1,6 +1,6 @@
 $ErrorActionPreference = "Stop"
 
-$Repo = if ($env:AGENTCTL_REPO) { $env:AGENTCTL_REPO } else { "keithpettit/agentctl" }
+$Repo = if ($env:AGENTCTL_REPO) { $env:AGENTCTL_REPO } else { "setuplinux/agentctl" }
 $Version = if ($env:AGENTCTL_VERSION) { $env:AGENTCTL_VERSION } else { "latest" }
 $InstallDir = if ($env:AGENTCTL_INSTALL_DIR) { $env:AGENTCTL_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA "agentctl" }
 

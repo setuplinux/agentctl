@@ -1,23 +1,28 @@
 # agentctl
 
-One small command to check, update, and manage local AI agent tools like Hermes, OpenClaw, Claude Code, and Codex.
+One small command to detect, install, update, and manage local AI agent tools like Hermes, OpenClaw, Claude Code, and Codex.
 
 ## Status
 
-Early MVP. Current goal: read-only local detection and status first; updates come after the basics are boring and reliable.
+Early but usable. The current focus is a simple bootstrap flow:
 
-## Install
+- detect agents already installed on the machine
+- install missing supported agents for the current OS
+- update installed agents through their official CLI paths
+- keep OpenClaw-specific repair and rollback logic for the gateway-heavy case
 
-Linux/macOS, once releases exist:
+## Install agentctl
+
+Linux/macOS, once release assets are published:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/keithpettit/agentctl/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/setuplinux/agentctl/main/install.sh | bash
 ```
 
-Windows PowerShell, once releases exist:
+Windows PowerShell, once release assets are published:
 
 ```powershell
-irm https://raw.githubusercontent.com/keithpettit/agentctl/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/setuplinux/agentctl/main/install.ps1 | iex
 ```
 
 ## Build from source
@@ -25,6 +30,7 @@ irm https://raw.githubusercontent.com/keithpettit/agentctl/main/install.ps1 | ie
 ```bash
 go build -o bin/agentctl ./cmd/agentctl
 ./bin/agentctl status
+./bin/agentctl setup
 ```
 
 ## Commands
@@ -32,14 +38,34 @@ go build -o bin/agentctl ./cmd/agentctl
 ```bash
 agentctl list
 agentctl status
-agentctl update <agent>   # planned
-agentctl doctor           # planned
+agentctl install <agent|all>
+agentctl setup
+agentctl doctor <agent|all>
+agentctl update <agent|all>
+agentctl fix openclaw
+agentctl logs openclaw
+agentctl rollback openclaw
 ```
+
+## Current behavior
+
+- `status` checks whether supported agents are already on `PATH` and shows version output when available.
+- `install` runs the official installer path for the target agent on the current platform.
+- `setup` installs only missing agents and skips anything already installed.
+- `update` prefers each agent's own update command instead of replacing upstream lifecycle logic.
+- `rollback` currently restores OpenClaw config and patched bundle files, not a full prior package version.
+
+## Platform notes
+
+- OpenClaw: Linux, macOS, and Windows install/update paths are cataloged; WSL2 is still the preferred Windows path.
+- Claude Code: Linux, macOS, and Windows install/update paths are cataloged.
+- Codex: installs through `npm install -g @openai/codex`; Windows support is still best-effort and often smoother in WSL.
+- Hermes: Linux and macOS install/update paths are cataloged; native Windows is intentionally not auto-installed.
 
 ## Design
 
 - Cross-platform Go binary.
-- Family-friendly output by default.
-- Delegates updates to official agent CLIs instead of replacing them.
-- Redacts sensitive output; no credentials printed.
-- Starts read-only: list/status before update/restart/logs.
+- Detect first, mutate second.
+- Delegate installs and updates to official agent installers or CLIs whenever possible.
+- Keep family-friendly output by default.
+- Avoid printing secrets.

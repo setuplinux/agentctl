@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo="${AGENTCTL_REPO:-keithpettit/agentctl}"
+repo="${AGENTCTL_REPO:-setuplinux/agentctl}"
 install_dir="${AGENTCTL_INSTALL_DIR:-$HOME/.local/bin}"
 version="${AGENTCTL_VERSION:-latest}"
 
