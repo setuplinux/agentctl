@@ -72,7 +72,24 @@ Write-Host "download: $($asset.browser_download_url)"
 Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $installer
 Write-Host "install: $installer /S"
 $process = Start-Process -FilePath $installer -ArgumentList "/S" -Wait -PassThru
-exit $process.ExitCode
+if ($process.ExitCode -ne 0) { exit $process.ExitCode }
+$installDir = Join-Path $env:LOCALAPPDATA "Programs\AionUi"
+$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+$pathParts = @()
+if ($userPath) { $pathParts = $userPath -split ';' | Where-Object { $_ } }
+$alreadyInPath = $false
+foreach ($part in $pathParts) {
+  if ($part.TrimEnd('\') -ieq $installDir.TrimEnd('\')) { $alreadyInPath = $true; break }
+}
+if (-not $alreadyInPath) {
+  $newUserPath = if ($userPath) { "$userPath;$installDir" } else { $installDir }
+  [Environment]::SetEnvironmentVariable("Path", $newUserPath, "User")
+  Write-Host "path: added $installDir to user PATH. Open a new terminal to use AionUi.exe directly."
+}
+if (($env:PATH -split ';') -notcontains $installDir) {
+  $env:PATH = "$installDir;$env:PATH"
+}
+exit 0
 `
 
 type Platform string
@@ -349,7 +366,7 @@ func Supported() []Agent {
 						Program: "bash",
 						Args:    []string{"-lc", aionUiLinuxDebInstallScript},
 					},
-					FirstRunHint: "Launch `AionUi`; it auto-detects installed ACP/CLI agents such as Hermes, OpenClaw, Claude Code, Codex, Qwen, and OpenCode.",
+					FirstRunHint: "Launch `AionUi` as a normal desktop user; Electron will not run as root without --no-sandbox, and root GUI app state is not recommended.",
 					Notes: []string{
 						"Linux install/update downloads the latest AionUi .deb from iOfficeAI/AionUi GitHub releases and installs it with apt-get.",
 					},

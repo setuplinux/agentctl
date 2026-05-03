@@ -70,7 +70,7 @@ func TestAionUiWindowsSupportInstallsAndUpdatesWithWinget(t *testing.T) {
 	}
 	for label, spec := range map[string]*CommandSpec{"install": support.Install, "update": support.Update} {
 		command := spec.Program + " " + strings.Join(spec.Args, " ")
-		for _, want := range []string{"winget", "iOfficeAI.AionUi", "--accept-package-agreements", "--accept-source-agreements", "api.github.com/repos/iOfficeAI/AionUi/releases/latest", "win-$arch.exe", "/S"} {
+		for _, want := range []string{"winget", "iOfficeAI.AionUi", "--accept-package-agreements", "--accept-source-agreements", "api.github.com/repos/iOfficeAI/AionUi/releases/latest", "win-$arch.exe", "/S", "Programs\\AionUi", "SetEnvironmentVariable"} {
 			if !strings.Contains(command, want) {
 				t.Fatalf("AionUi Windows %s command missing %q: %s", label, want, command)
 			}

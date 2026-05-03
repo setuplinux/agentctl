@@ -61,7 +61,7 @@ agentctl rollback openclaw
 - Claude Code: Linux, macOS, and Windows install/update paths are cataloged.
 - Codex: installs through `npm install -g @openai/codex`; Windows support is still best-effort and often smoother in WSL.
 - Hermes: Linux and macOS install/update paths are cataloged; native Windows is intentionally not auto-installed.
-- AionUi: Linux install/update downloads the latest `.deb` from `iOfficeAI/AionUi` GitHub releases and installs it with `apt-get`; Windows install/update tries `winget install --id iOfficeAI.AionUi` first, then falls back to the latest GitHub `win-x64.exe`/`win-arm64.exe` installer with `/S`; macOS is detect-only until app bundle install/update behavior is verified.
+- AionUi: Linux install/update downloads the latest `.deb` from `iOfficeAI/AionUi` GitHub releases and installs it with `apt-get`; launch Linux AionUi as a normal desktop user, not root. Windows install/update tries `winget install --id iOfficeAI.AionUi` first, then falls back to the latest GitHub `win-x64.exe`/`win-arm64.exe` installer with `/S` and adds `%LOCALAPPDATA%\Programs\AionUi` to the user PATH; macOS is detect-only until app bundle install/update behavior is verified.
 
 ## Design
 
