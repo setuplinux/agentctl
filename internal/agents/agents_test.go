@@ -53,6 +53,31 @@ func TestAionUiLinuxSupportInstallsAndUpdatesFromLatestDeb(t *testing.T) {
 	}
 }
 
+func TestAionUiWindowsSupportInstallsAndUpdatesWithWinget(t *testing.T) {
+	agent, ok := Find("aionui")
+	if !ok {
+		t.Fatal("Find(aionui) = false")
+	}
+	support, ok := agent.Platforms[PlatformWindows]
+	if !ok {
+		t.Fatal("AionUi missing Windows support")
+	}
+	if support.Install == nil {
+		t.Fatal("AionUi Windows install command is nil")
+	}
+	if support.Update == nil {
+		t.Fatal("AionUi Windows update command is nil")
+	}
+	for label, spec := range map[string]*CommandSpec{"install": support.Install, "update": support.Update} {
+		command := spec.Program + " " + strings.Join(spec.Args, " ")
+		for _, want := range []string{"winget", "iOfficeAI.AionUi", "--accept-package-agreements", "--accept-source-agreements"} {
+			if !strings.Contains(command, want) {
+				t.Fatalf("AionUi Windows %s command missing %q: %s", label, want, command)
+			}
+		}
+	}
+}
+
 func TestCheckAllForPlatformMarksInstalledAndMissingAgents(t *testing.T) {
 	lookup := func(name string) (string, error) {
 		switch name {
@@ -87,6 +112,39 @@ func TestWindowsSupportFlagsReflectCatalog(t *testing.T) {
 	assertSupport(t, statuses, "claude", true, true)
 	assertSupport(t, statuses, "openclaw", true, true)
 	assertSupport(t, statuses, "codex", true, true)
+	assertSupport(t, statuses, "aionui", true, true)
+}
+
+func TestWindowsDetectionFindsAionUiInLocalAppProgramsWhenPathIsStale(t *testing.T) {
+	tempHome := t.TempDir()
+	t.Setenv("LOCALAPPDATA", filepath.Join(tempHome, "AppData", "Local"))
+	t.Setenv("USERPROFILE", tempHome)
+	t.Setenv("APPDATA", filepath.Join(tempHome, "AppData", "Roaming"))
+
+	aionPath := filepath.Join(tempHome, "AppData", "Local", "Programs", "AionUi", "AionUi.exe")
+	if err := os.MkdirAll(filepath.Dir(aionPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(aionPath, []byte("stub"), 0o755); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	lookup := func(name string) (string, error) {
+		return "", ErrNotFound
+	}
+
+	agent, ok := Find("aionui")
+	if !ok {
+		t.Fatal("Find(aionui) = false")
+	}
+	status := CheckAgent(PlatformWindows, agent, lookup, nil)
+
+	if status.State != "installed" {
+		t.Fatalf("status.State = %q, want installed", status.State)
+	}
+	if status.Path != aionPath {
+		t.Fatalf("status.Path = %q, want %q", status.Path, aionPath)
+	}
 }
 
 func TestWindowsDetectionFindsClaudeInLocalBinWhenPathIsStale(t *testing.T) {

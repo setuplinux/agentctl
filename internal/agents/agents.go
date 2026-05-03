@@ -340,9 +340,17 @@ func Supported() []Agent {
 					},
 				},
 				PlatformWindows: {
-					FirstRunHint: "Install the latest AionUi Windows installer from https://github.com/iOfficeAI/AionUi/releases.",
+					Install: &CommandSpec{
+						Program: "winget",
+						Args:    []string{"install", "--id", "iOfficeAI.AionUi", "--exact", "--accept-package-agreements", "--accept-source-agreements"},
+					},
+					Update: &CommandSpec{
+						Program: "winget",
+						Args:    []string{"upgrade", "--id", "iOfficeAI.AionUi", "--exact", "--accept-package-agreements", "--accept-source-agreements"},
+					},
+					FirstRunHint: "Launch AionUi after install; it auto-detects installed ACP/CLI agents such as Hermes, OpenClaw, Claude Code, Codex, Qwen, and OpenCode.",
 					Notes: []string{
-						"Windows AionUi is currently detect-only in agentctl; installer/update behavior should be verified before enabling unattended NSIS installs.",
+						"Windows install/update uses winget package iOfficeAI.AionUi from https://www.aionui.com/download/.",
 					},
 				},
 			},
@@ -437,8 +445,10 @@ func defaultRunner(name string, args ...string) (string, error) {
 
 func windowsExecutableCandidates(agent Agent) []string {
 	appData := strings.TrimSpace(os.Getenv("APPDATA"))
+	localAppData := strings.TrimSpace(os.Getenv("LOCALAPPDATA"))
+	programFiles := strings.TrimSpace(os.Getenv("ProgramFiles"))
 	userProfile := strings.TrimSpace(os.Getenv("USERPROFILE"))
-	candidates := make([]string, 0, 8)
+	candidates := make([]string, 0, 16)
 
 	if appData != "" {
 		npmDir := filepath.Join(appData, "npm")
@@ -447,6 +457,16 @@ func windowsExecutableCandidates(agent Agent) []string {
 			filepath.Join(npmDir, agent.Executable+".cmd"),
 			filepath.Join(npmDir, agent.Executable+".ps1"),
 			filepath.Join(npmDir, agent.Executable+".exe"),
+		)
+	}
+	if localAppData != "" {
+		candidates = append(candidates,
+			filepath.Join(localAppData, "Programs", agent.Executable, agent.Executable+".exe"),
+		)
+	}
+	if programFiles != "" {
+		candidates = append(candidates,
+			filepath.Join(programFiles, agent.Executable, agent.Executable+".exe"),
 		)
 	}
 	if userProfile != "" {
