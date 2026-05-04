@@ -1,6 +1,8 @@
 package main
 
 import (
+	"archive/zip"
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -8,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -18,16 +21,24 @@ import (
 var version = "dev"
 
 func main() {
-	os.Exit(Run(os.Args[1:], os.Stdout, os.Stderr))
+	os.Exit(RunWithIO(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
 }
 
 func Run(args []string, stdout io.Writer, stderr io.Writer) int {
+	return RunWithIO(args, os.Stdin, stdout, stderr)
+}
+
+func RunWithIO(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int {
 	if len(args) == 0 {
 		printHelp(stdout)
 		return 0
 	}
 
 	switch args[0] {
+	case "tui", "console":
+		return runTUI(args[1:], stdin, stdout, stderr)
+	case "bundle":
+		return runBundle(args[1:], stdout, stderr)
 	case "list":
 		return runList(stdout)
 	case "status":
@@ -412,6 +423,25 @@ func runCommandSpec(stdout io.Writer, stderr io.Writer, timeout time.Duration, s
 		return 2
 	}
 	return runLogged(stdout, stderr, timeout, spec.Program, spec.Args...)
+}
+
+func displayAgentName(value string) string {
+	switch strings.ToLower(value) {
+	case "openclaw":
+		return "OpenClaw"
+	case "aionui":
+		return "AionUi"
+	case "codex":
+		return "Codex"
+	case "claude":
+		return "Claude"
+	case "gemini":
+		return "Gemini"
+	case "hermes":
+		return "Hermes"
+	default:
+		return titleCase(value)
+	}
 }
 
 func titleCase(value string) string {
@@ -1119,15 +1149,296 @@ func openClawRollback(stdout io.Writer, stderr io.Writer) int {
 	return restoreOpenClawRollback(snapshot, stdout, stderr)
 }
 
+type tuiChoice struct {
+	Label string
+	Value string
+}
+
+func runTUI(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int {
+	dryRun := false
+	for _, arg := range args {
+		if arg == "--dry-run" || arg == "-n" {
+			dryRun = true
+		}
+	}
+	fmt.Fprintln(stdout, "agentctl operations console")
+	fmt.Fprintln(stdout, "Use ↑/↓ arrows, Enter to select, q to quit.")
+	if dryRun {
+		fmt.Fprintln(stdout, "mode: dry-run (no installer, updater, fix, or rollback command will execute)")
+	}
+	fmt.Fprintln(stdout)
+
+	platform := agents.PlatformFromGOOS(runtime.GOOS)
+	statuses := agents.CheckAllForPlatform(platform, exec.LookPath, captureCommandOutput)
+	agentChoices := make([]tuiChoice, 0, len(statuses))
+	for _, status := range statuses {
+		label := fmt.Sprintf("%-8s %s", displayAgentName(status.Name), status.State)
+		if status.Version != "" {
+			label += "  " + status.Version
+		}
+		agentChoices = append(agentChoices, tuiChoice{Label: label, Value: status.Name})
+	}
+
+	reader := bufio.NewReader(stdin)
+	agent, ok := selectTUIChoice(reader, stdout, "Select agent", agentChoices)
+	if !ok {
+		fmt.Fprintln(stdout, "cancelled")
+		return 0
+	}
+	fmt.Fprintf(stdout, "selected agent: %s\n", agent.Value)
+	actions := actionsForAgent(agent.Value)
+	action, ok := selectTUIChoice(reader, stdout, "Select action", actions)
+	if !ok {
+		fmt.Fprintln(stdout, "cancelled")
+		return 0
+	}
+	fmt.Fprintf(stdout, "selected action: %s\n", action.Value)
+
+	cmdArgs := commandArgsForTUIAction(agent.Value, action.Value)
+	if len(cmdArgs) == 0 {
+		fmt.Fprintf(stderr, "action %q is not available for %s\n", action.Value, agent.Value)
+		return 2
+	}
+	fmt.Fprintf(stdout, "dry-run: agentctl %s\n", strings.Join(cmdArgs, " "))
+	if dryRun {
+		return 0
+	}
+	if isMutationAction(action.Value) {
+		fmt.Fprint(stdout, "Type y to continue: ")
+		answer, _ := bufio.NewReader(stdin).ReadString('\n')
+		if strings.ToLower(strings.TrimSpace(answer)) != "y" {
+			fmt.Fprintln(stdout, "cancelled")
+			return 0
+		}
+	}
+	return RunWithIO(cmdArgs, stdin, stdout, stderr)
+}
+
+func actionsForAgent(agent string) []tuiChoice {
+	actions := []tuiChoice{
+		{Label: "Doctor / troubleshoot", Value: "doctor"},
+		{Label: "Update", Value: "update"},
+		{Label: "Install", Value: "install"},
+		{Label: "Support bundle", Value: "bundle"},
+	}
+	if agent == "openclaw" {
+		actions = append(actions,
+			tuiChoice{Label: "Fix common gateway/update breakage", Value: "fix"},
+			tuiChoice{Label: "Logs", Value: "logs"},
+			tuiChoice{Label: "Rollback", Value: "rollback"},
+		)
+	}
+	return actions
+}
+
+func commandArgsForTUIAction(agent string, action string) []string {
+	switch action {
+	case "doctor":
+		return []string{"doctor", agent}
+	case "update":
+		return []string{"update", agent}
+	case "install":
+		return []string{"install", agent}
+	case "bundle":
+		return []string{"bundle", agent}
+	case "fix", "logs", "rollback":
+		if agent == "openclaw" {
+			return []string{action, agent}
+		}
+	}
+	return nil
+}
+
+func isMutationAction(action string) bool {
+	switch action {
+	case "install", "update", "fix", "rollback":
+		return true
+	default:
+		return false
+	}
+}
+
+func selectTUIChoice(reader *bufio.Reader, stdout io.Writer, title string, choices []tuiChoice) (tuiChoice, bool) {
+	if len(choices) == 0 {
+		return tuiChoice{}, false
+	}
+	selected := 0
+	for {
+		fmt.Fprintf(stdout, "== %s ==\n", title)
+		for i, choice := range choices {
+			prefix := "  "
+			if i == selected {
+				prefix = "> "
+			}
+			fmt.Fprintf(stdout, "%s%s\n", prefix, choice.Label)
+		}
+		key, ok := readTUIKey(reader)
+		if !ok {
+			return choices[selected], true
+		}
+		switch key {
+		case "up":
+			if selected == 0 {
+				selected = len(choices) - 1
+			} else {
+				selected--
+			}
+		case "down":
+			selected = (selected + 1) % len(choices)
+		case "enter":
+			return choices[selected], true
+		case "quit":
+			return tuiChoice{}, false
+		}
+	}
+}
+
+func readTUIKey(reader *bufio.Reader) (string, bool) {
+	b, err := reader.ReadByte()
+	if err != nil {
+		return "enter", false
+	}
+	switch b {
+	case 'q', 'Q':
+		return "quit", true
+	case '\r', '\n':
+		return "enter", true
+	case 0x1b:
+		second, err := reader.ReadByte()
+		if err != nil || second != '[' {
+			return "", true
+		}
+		third, err := reader.ReadByte()
+		if err != nil {
+			return "", true
+		}
+		if third == 'A' {
+			return "up", true
+		}
+		if third == 'B' {
+			return "down", true
+		}
+	}
+	return "", true
+}
+
+func runBundle(args []string, stdout io.Writer, stderr io.Writer) int {
+	name := agentName(args)
+	if name == "" {
+		fmt.Fprintf(stderr, "usage: agentctl bundle <agent|all>\n")
+		return 2
+	}
+	agentsForBundle := []string{name}
+	if name == "all" {
+		agentsForBundle = nil
+		for _, agent := range agents.Supported() {
+			agentsForBundle = append(agentsForBundle, agent.Name)
+		}
+	} else if _, ok := agents.Find(name); !ok {
+		fmt.Fprintf(stderr, "unknown agent: %s\n", name)
+		return 2
+	}
+	path, err := createSupportBundle(agentsForBundle)
+	if err != nil {
+		fmt.Fprintf(stderr, "support bundle failed: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "support bundle: %s\n", path)
+	return 0
+}
+
+func createSupportBundle(agentNames []string) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	root := filepath.Join(home, ".agentctl", "bundles")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return "", err
+	}
+	bundlePath := filepath.Join(root, "agentctl-bundle-"+time.Now().Format("20060102-150405")+".zip")
+	file, err := os.Create(bundlePath)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	zw := zip.NewWriter(file)
+	defer zw.Close()
+
+	manifest := map[string]any{
+		"created_at": time.Now().Format(time.RFC3339),
+		"agentctl":   version,
+		"os":         runtime.GOOS,
+		"arch":       runtime.GOARCH,
+		"agents":     agentNames,
+	}
+	manifestJSON, _ := json.MarshalIndent(manifest, "", "  ")
+	if err := addZipFile(zw, "manifest.json", string(manifestJSON)+"\n"); err != nil {
+		return "", err
+	}
+	platform := agents.PlatformFromGOOS(runtime.GOOS)
+	var status strings.Builder
+	status.WriteString("Agent status:\n")
+	for _, s := range agents.CheckAllForPlatform(platform, exec.LookPath, captureCommandOutput) {
+		if !containsString(agentNames, s.Name) {
+			continue
+		}
+		status.WriteString(fmt.Sprintf("- %s: %s %s %s\n", s.Name, s.State, s.Path, s.Version))
+	}
+	if err := addZipFile(zw, "status.txt", redactSensitiveText(status.String())); err != nil {
+		return "", err
+	}
+	if err := addZipFile(zw, "README.txt", "This agentctl support bundle is redacted. It excludes raw auth files, .env files, browser sessions, and callback URLs.\n"); err != nil {
+		return "", err
+	}
+	return bundlePath, nil
+}
+
+func addZipFile(zw *zip.Writer, name string, content string) error {
+	w, err := zw.Create(name)
+	if err != nil {
+		return err
+	}
+	_, err = w.Write([]byte(content))
+	return err
+}
+
+func containsString(values []string, value string) bool {
+	for _, item := range values {
+		if item == value {
+			return true
+		}
+	}
+	return false
+}
+
+var redactionPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)(api[_-]?key|refresh[_-]?token|access[_-]?token|id[_-]?token|authorization)(\s*[=:]\s*)[^\s]+`),
+	regexp.MustCompile(`sk-[A-Za-z0-9_-]+`),
+	regexp.MustCompile(`bot[0-9]+:[^\s/]+`),
+	regexp.MustCompile(`https?://localhost:1455/[^\s]+`),
+	regexp.MustCompile(`https?://127\.0\.0\.1:1455/[^\s]+`),
+}
+
+func redactSensitiveText(input string) string {
+	out := input
+	for _, pattern := range redactionPatterns {
+		out = pattern.ReplaceAllString(out, "[REDACTED]")
+	}
+	return out
+}
+
 func printHelp(w io.Writer) {
 	fmt.Fprintln(w, "agentctl - manage local AI agent tools")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Usage:")
+	fmt.Fprintln(w, "  agentctl tui")
 	fmt.Fprintln(w, "  agentctl list")
 	fmt.Fprintln(w, "  agentctl status")
 	fmt.Fprintln(w, "  agentctl install <agent|all>")
 	fmt.Fprintln(w, "  agentctl setup")
 	fmt.Fprintln(w, "  agentctl doctor <agent|all>")
+	fmt.Fprintln(w, "  agentctl bundle <agent|all>")
 	fmt.Fprintln(w, "  agentctl update <agent|all>")
 	fmt.Fprintln(w, "  agentctl uninstall <agent|all>")
 	fmt.Fprintln(w, "  agentctl version")
@@ -1136,6 +1447,7 @@ func printHelp(w io.Writer) {
 	fmt.Fprintln(w, "  agentctl rollback openclaw")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Examples:")
+	fmt.Fprintln(w, "  agentctl tui --dry-run")
 	fmt.Fprintln(w, "  agentctl status")
 	fmt.Fprintln(w, "  agentctl install aionui")
 	fmt.Fprintln(w, "  agentctl update all")

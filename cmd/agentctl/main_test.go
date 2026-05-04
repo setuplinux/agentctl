@@ -76,10 +76,74 @@ func TestRunHelpShowsUsageExamplesAndUninstall(t *testing.T) {
 		t.Fatalf("exitCode = %d, want 0; stderr=%s", exitCode, stderr.String())
 	}
 	out := stdout.String()
-	for _, want := range []string{"agentctl uninstall <agent|all>", "agentctl version", "Examples:", "agentctl install aionui", "agentctl update all", "agentctl uninstall codex"} {
+	for _, want := range []string{"agentctl tui", "agentctl bundle <agent|all>", "agentctl uninstall <agent|all>", "agentctl version", "Examples:", "agentctl tui --dry-run", "agentctl install aionui", "agentctl update all", "agentctl uninstall codex"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("help output missing %q: %s", want, out)
 		}
+	}
+}
+
+func TestRunTUIDryRunShowsAgentAndActionMenus(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	input := strings.NewReader("q")
+	exitCode := RunWithIO([]string{"tui", "--dry-run"}, input, &stdout, &stderr)
+
+	if exitCode != 0 {
+		t.Fatalf("exitCode = %d, want 0; stderr=%s", exitCode, stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{"agentctl operations console", "Use ↑/↓", "Hermes", "OpenClaw", "Codex", "dry-run"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("tui output missing %q: %s", want, out)
+		}
+	}
+}
+
+func TestRunTUIDryRunArrowSelectsOpenClawUpdateWithoutExecuting(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	input := strings.NewReader("\x1b[B\r\x1b[B\r")
+	exitCode := RunWithIO([]string{"tui", "--dry-run"}, input, &stdout, &stderr)
+
+	if exitCode != 0 {
+		t.Fatalf("exitCode = %d, want 0; stderr=%s", exitCode, stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{"selected agent: openclaw", "selected action: update", "dry-run: agentctl update openclaw"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("tui dry-run output missing %q: %s", want, out)
+		}
+	}
+}
+
+func TestRunBundleCreatesRedactedSupportBundle(t *testing.T) {
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+
+	var stdout, stderr bytes.Buffer
+	exitCode := Run([]string{"bundle", "codex"}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("exitCode = %d, want 0; stderr=%s", exitCode, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "support bundle:") {
+		t.Fatalf("bundle output missing path: %s", out)
+	}
+	bundlePath := strings.TrimSpace(strings.TrimPrefix(out[strings.LastIndex(out, "support bundle:"):], "support bundle:"))
+	if _, err := os.Stat(bundlePath); err != nil {
+		t.Fatalf("bundle path %q not created: %v", bundlePath, err)
+	}
+}
+
+func TestRedactSensitiveTextMasksTokensAndCallbackURLs(t *testing.T) {
+	input := "OPENAI_API_KEY=" + "sk-" + "test callback=http://localhost:1455/auth/callback?code=abc refresh_token=secret bot123456:ABCDEF"
+	got := redactSensitiveText(input)
+	for _, forbidden := range []string{"sk-test", "code=abc", "secret", "bot123456:ABCDEF"} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("redacted text still contains %q: %s", forbidden, got)
+		}
+	}
+	if !strings.Contains(got, "[REDACTED]") {
+		t.Fatalf("redacted text missing marker: %s", got)
 	}
 }
 
