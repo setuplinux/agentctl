@@ -118,7 +118,11 @@ else:
     raise SystemExit(f'no AionUi release asset ending with {suffix}')
 PY
 } )"
-tmpdir="$(mktemp -d)"
+tmp_parent="${TMPDIR:-/var/tmp}"
+if [ ! -d "$tmp_parent" ] || [ ! -w "$tmp_parent" ]; then
+  tmp_parent="/tmp"
+fi
+tmpdir="$(mktemp -d -p "$tmp_parent" agentctl-aionui.XXXXXX)"
 trap 'rm -rf "$tmpdir"' EXIT
 deb="$tmpdir/aionui.deb"
 echo "download: $asset_url"
@@ -316,10 +320,6 @@ func Supported() []Agent {
 						Program: "hermes",
 						Args:    []string{"update"},
 					},
-					Uninstall: &CommandSpec{
-						Program: "hermes",
-						Args:    []string{"uninstall", "--yes"},
-					},
 					Doctor: &CommandSpec{
 						Program: "hermes",
 						Args:    []string{"doctor"},
@@ -337,10 +337,6 @@ func Supported() []Agent {
 					Update: &CommandSpec{
 						Program: "hermes",
 						Args:    []string{"update"},
-					},
-					Uninstall: &CommandSpec{
-						Program: "hermes",
-						Args:    []string{"uninstall", "--yes"},
 					},
 					Doctor: &CommandSpec{
 						Program: "hermes",
@@ -493,11 +489,8 @@ func Supported() []Agent {
 			VersionArgs: []string{"--version"},
 			Platforms: map[Platform]PlatformSupport{
 				PlatformLinux: {
-					Install: npmInstallSpec("@openai/codex"),
-					Update: &CommandSpec{
-						Program: "codex",
-						Args:    []string{"--upgrade"},
-					},
+					Install:      npmInstallSpec("@openai/codex"),
+					Update:       npmInstallSpec("@openai/codex"),
 					Uninstall:    npmUninstallSpec("@openai/codex"),
 					FirstRunHint: "Run `codex --login` after install.",
 					Notes: []string{
@@ -505,20 +498,14 @@ func Supported() []Agent {
 					},
 				},
 				PlatformDarwin: {
-					Install: npmInstallSpec("@openai/codex"),
-					Update: &CommandSpec{
-						Program: "codex",
-						Args:    []string{"--upgrade"},
-					},
+					Install:      npmInstallSpec("@openai/codex"),
+					Update:       npmInstallSpec("@openai/codex"),
 					Uninstall:    npmUninstallSpec("@openai/codex"),
 					FirstRunHint: "Run `codex --login` after install.",
 				},
 				PlatformWindows: {
-					Install: windowsNpmInstallSpec("@openai/codex"),
-					Update: &CommandSpec{
-						Program: "codex",
-						Args:    []string{"--upgrade"},
-					},
+					Install:      windowsNpmInstallSpec("@openai/codex"),
+					Update:       windowsNpmInstallSpec("@openai/codex"),
 					Uninstall:    npmUninstallSpec("@openai/codex"),
 					FirstRunHint: "Run `codex --login` after install.",
 					Notes: []string{
@@ -647,7 +634,11 @@ func CheckAgent(platform Platform, agent Agent, lookup LookupFunc, runner Runner
 		runner = defaultRunner
 	}
 	if status.State == "installed" && len(agent.VersionArgs) > 0 {
-		if version, err := runner(agent.Executable, agent.VersionArgs...); err == nil {
+		version, err := runner(agent.Executable, agent.VersionArgs...)
+		if err != nil && status.Path != "" && status.Path != agent.Executable {
+			version, err = runner(status.Path, agent.VersionArgs...)
+		}
+		if err == nil {
 			status.Version = firstMeaningfulLine(version)
 		}
 	}
@@ -671,6 +662,11 @@ func resolveExecutablePath(platform Platform, agent Agent, lookup LookupFunc) (s
 		return path, nil
 	}
 	if platform != PlatformWindows {
+		for _, candidate := range unixExecutableCandidates(agent) {
+			if fileExists(candidate) {
+				return candidate, nil
+			}
+		}
 		return path, err
 	}
 	for _, candidate := range windowsExecutableCandidates(agent) {
@@ -697,6 +693,14 @@ func defaultRunner(name string, args ...string) (string, error) {
 		return "", err
 	}
 	return stdout.String(), nil
+}
+
+func unixExecutableCandidates(agent Agent) []string {
+	candidates := make([]string, 0, 4)
+	if home := strings.TrimSpace(os.Getenv("HOME")); home != "" {
+		candidates = append(candidates, filepath.Join(home, ".local", "bin", agent.Executable))
+	}
+	return candidates
 }
 
 func windowsExecutableCandidates(agent Agent) []string {

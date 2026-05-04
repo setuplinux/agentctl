@@ -48,7 +48,7 @@ func TestAionUiLinuxSupportInstallsAndUpdatesFromLatestDeb(t *testing.T) {
 	install := support.Install.Program + " " + strings.Join(support.Install.Args, " ")
 	update := support.Update.Program + " " + strings.Join(support.Update.Args, " ")
 	for _, command := range []string{install, update} {
-		for _, want := range []string{"api.github.com/repos/iOfficeAI/AionUi/releases/latest", ".deb", "apt-get"} {
+		for _, want := range []string{"api.github.com/repos/iOfficeAI/AionUi/releases/latest", ".deb", "apt-get", "/var/tmp"} {
 			if !strings.Contains(command, want) {
 				t.Fatalf("AionUi command missing %q: %s", want, command)
 			}
@@ -96,9 +96,12 @@ func TestAionUiWindowsSupportInstallsAndUpdatesWithWinget(t *testing.T) {
 	}
 }
 
-func TestEveryAgentInstallSupportHasUninstall(t *testing.T) {
+func TestEveryAgentInstallSupportHasUninstallExceptInteractiveHermes(t *testing.T) {
 	for _, agent := range Supported() {
 		for platform, support := range agent.Platforms {
+			if agent.Name == "hermes" {
+				continue
+			}
 			if support.Install != nil && support.Uninstall == nil {
 				t.Fatalf("%s has install support on %s but no uninstall command", agent.Name, platform)
 			}
@@ -106,7 +109,21 @@ func TestEveryAgentInstallSupportHasUninstall(t *testing.T) {
 	}
 }
 
+func TestHermesDoesNotAdvertiseNonInteractiveUninstall(t *testing.T) {
+	agent, ok := Find("hermes")
+	if !ok {
+		t.Fatal("Find(hermes) = false")
+	}
+	for _, platform := range []Platform{PlatformLinux, PlatformDarwin} {
+		support := agent.Platforms[platform]
+		if support.Uninstall != nil {
+			t.Fatalf("Hermes %s uninstall should be nil until native hermes uninstall supports non-interactive subprocesses", platform)
+		}
+	}
+}
+
 func TestCheckAllForPlatformMarksInstalledAndMissingAgents(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	lookup := func(name string) (string, error) {
 		switch name {
 		case "hermes", "codex":
@@ -213,6 +230,31 @@ func TestWindowsNpmBackedInstallsBootstrapNodeWithWinget(t *testing.T) {
 	}
 }
 
+func TestCodexSupportUpdatesViaNpmPackageNotRemovedUpgradeFlag(t *testing.T) {
+	agent, ok := Find("codex")
+	if !ok {
+		t.Fatal("Find(codex) = false")
+	}
+	for _, platform := range []Platform{PlatformLinux, PlatformDarwin, PlatformWindows} {
+		support, ok := agent.Platforms[platform]
+		if !ok {
+			t.Fatalf("Codex missing %s support", platform)
+		}
+		if support.Update == nil {
+			t.Fatalf("Codex %s update command is nil", platform)
+		}
+		command := support.Update.Program + " " + strings.Join(support.Update.Args, " ")
+		if strings.Contains(command, "--upgrade") {
+			t.Fatalf("Codex %s update still uses removed --upgrade flag: %s", platform, command)
+		}
+		for _, want := range []string{"npm", "install", "-g", "@openai/codex"} {
+			if !strings.Contains(command, want) {
+				t.Fatalf("Codex %s update command missing %q: %s", platform, want, command)
+			}
+		}
+	}
+}
+
 func TestGeminiWindowsUpdateAlsoBootstrapsNodeWithWinget(t *testing.T) {
 	agent, ok := Find("gemini")
 	if !ok {
@@ -262,6 +304,45 @@ func TestWindowsDetectionFindsAionUiInLocalAppProgramsWhenPathIsStale(t *testing
 	}
 	if status.Path != aionPath {
 		t.Fatalf("status.Path = %q, want %q", status.Path, aionPath)
+	}
+}
+
+func TestLinuxDetectionFindsClaudeInLocalBinWhenPathIsStale(t *testing.T) {
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+
+	claudePath := filepath.Join(tempHome, ".local", "bin", "claude")
+	if err := os.MkdirAll(filepath.Dir(claudePath), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(claudePath, []byte("stub"), 0o755); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	lookup := func(name string) (string, error) {
+		return "", ErrNotFound
+	}
+	runner := func(name string, args ...string) (string, error) {
+		if name != claudePath {
+			return "", ErrNotFound
+		}
+		return "2.1.126 (Claude Code)\n", nil
+	}
+
+	agent, ok := Find("claude")
+	if !ok {
+		t.Fatal("Find(claude) = false")
+	}
+	status := CheckAgent(PlatformLinux, agent, lookup, runner)
+
+	if status.State != "installed" {
+		t.Fatalf("status.State = %q, want installed", status.State)
+	}
+	if status.Path != claudePath {
+		t.Fatalf("status.Path = %q, want %q", status.Path, claudePath)
+	}
+	if status.Version != "2.1.126 (Claude Code)" {
+		t.Fatalf("status.Version = %q", status.Version)
 	}
 }
 
