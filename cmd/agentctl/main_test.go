@@ -233,6 +233,28 @@ func TestReadTUIKeyCancelsOnControlCAndD(t *testing.T) {
 	}
 }
 
+func TestReadTUIKeySupportsWindowsConsoleArrowSequences(t *testing.T) {
+	tests := []struct {
+		name  string
+		input []byte
+		want  string
+	}{
+		{name: "extended up", input: []byte{0xe0, 0x48}, want: "up"},
+		{name: "extended down", input: []byte{0xe0, 0x50}, want: "down"},
+		{name: "null-prefixed up", input: []byte{0x00, 0x48}, want: "up"},
+		{name: "null-prefixed down", input: []byte{0x00, 0x50}, want: "down"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			key, ok := readTUIKey(bufio.NewReader(bytes.NewReader(tt.input)))
+			if !ok || key != tt.want {
+				t.Fatalf("readTUIKey(%#v) = %q, %v; want %q, true", tt.input, key, ok, tt.want)
+			}
+		})
+	}
+}
+
 func TestRunTUIEnablesRawModeForFileInput(t *testing.T) {
 	oldRaw := makeTerminalRaw
 	defer func() { makeTerminalRaw = oldRaw }()

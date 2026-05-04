@@ -1410,6 +1410,17 @@ func readTUIKey(reader *bufio.Reader) (string, bool) {
 		return "up", true
 	case '\r', '\n':
 		return "enter", true
+	case 0x00, 0xe0:
+		second, err := reader.ReadByte()
+		if err != nil {
+			return "", true
+		}
+		switch second {
+		case 0x48:
+			return "up", true
+		case 0x50:
+			return "down", true
+		}
 	case 0x1b:
 		second, err := reader.ReadByte()
 		if err != nil || second != '[' {
