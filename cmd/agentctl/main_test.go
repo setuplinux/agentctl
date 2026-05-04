@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"os"
@@ -174,6 +175,60 @@ func TestRunTUIDryRunViKeysSelectOpenClawUpdateWithoutExecuting(t *testing.T) {
 	for _, want := range []string{"selected agent: openclaw", "selected action: update", "dry-run: agentctl update openclaw"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("tui dry-run vi-key output missing %q: %s", want, out)
+		}
+	}
+}
+
+func TestSelectTUIChoiceTerminalControlUsesCRLFAndRedraw(t *testing.T) {
+	var stdout bytes.Buffer
+	reader := bufio.NewReader(strings.NewReader("j\r"))
+	choices := []tuiChoice{{Label: "Hermes", Value: "hermes"}, {Label: "OpenClaw", Value: "openclaw"}}
+
+	selected, ok := selectTUIChoice(reader, &stdout, "Select agent", choices, true)
+	if !ok {
+		t.Fatalf("selectTUIChoice() ok = false, want true")
+	}
+	if selected.Value != "openclaw" {
+		t.Fatalf("selected = %q, want openclaw", selected.Value)
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "\r\n") {
+		t.Fatalf("terminal output missing CRLF line endings: %q", out)
+	}
+	if !strings.Contains(out, "\x1b[3F\x1b[J") {
+		t.Fatalf("terminal output missing menu redraw clear sequence: %q", out)
+	}
+}
+
+func TestReadTUIConfirmationAcceptsYWithoutNewlineAndCancelsInterrupts(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{name: "y without newline", input: "y", want: true},
+		{name: "uppercase y", input: "Y", want: true},
+		{name: "ctrl c", input: string([]byte{0x03}), want: false},
+		{name: "ctrl d", input: string([]byte{0x04}), want: false},
+		{name: "q", input: "q", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout bytes.Buffer
+			got := readTUIConfirmation(bufio.NewReader(strings.NewReader(tt.input)), &stdout, true)
+			if got != tt.want {
+				t.Fatalf("readTUIConfirmation() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestReadTUIKeyCancelsOnControlCAndD(t *testing.T) {
+	for _, input := range []byte{0x03, 0x04} {
+		key, ok := readTUIKey(bufio.NewReader(strings.NewReader(string([]byte{input}))))
+		if !ok || key != "quit" {
+			t.Fatalf("readTUIKey(%#x) = %q, %v; want quit, true", input, key, ok)
 		}
 	}
 }

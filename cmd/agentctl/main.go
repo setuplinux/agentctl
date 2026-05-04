@@ -1200,20 +1200,31 @@ func runTUI(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) 
 			dryRun = true
 		}
 	}
+	terminalControl := false
+	restoreTerminal := func() {}
 	if file, ok := stdin.(*os.File); ok {
+		inputIsTerminal := term.IsTerminal(int(file.Fd()))
 		restore, err := makeTerminalRaw(file)
 		if err != nil {
 			fmt.Fprintf(stderr, "warning: could not enable raw terminal mode: %v\n", err)
 		} else {
-			defer restore()
+			restored := false
+			restoreTerminal = func() {
+				if !restored {
+					restore()
+					restored = true
+				}
+			}
+			defer restoreTerminal()
 		}
+		terminalControl = inputIsTerminal && outputIsTerminal(stdout)
 	}
-	fmt.Fprintln(stdout, "agentctl operations console")
-	fmt.Fprintln(stdout, "Use ↑/↓ arrows, j/k, or n/p to move; Enter to select; q to quit.")
+	writeTUILine(stdout, terminalControl, "agentctl operations console")
+	writeTUILine(stdout, terminalControl, "Use ↑/↓ arrows, j/k, or n/p to move; Enter to select; q to quit.")
 	if dryRun {
-		fmt.Fprintln(stdout, "mode: dry-run (no installer, updater, fix, or rollback command will execute)")
+		writeTUILine(stdout, terminalControl, "mode: dry-run (no installer, updater, fix, or rollback command will execute)")
 	}
-	fmt.Fprintln(stdout)
+	writeTUILine(stdout, terminalControl, "")
 
 	platform := agents.PlatformFromGOOS(runtime.GOOS)
 	statuses := agents.CheckAllForPlatform(platform, exec.LookPath, captureCommandOutput)
@@ -1227,38 +1238,75 @@ func runTUI(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) 
 	}
 
 	reader := bufio.NewReader(stdin)
-	agent, ok := selectTUIChoice(reader, stdout, "Select agent", agentChoices)
+	agent, ok := selectTUIChoice(reader, stdout, "Select agent", agentChoices, terminalControl)
 	if !ok {
-		fmt.Fprintln(stdout, "cancelled")
+		writeTUILine(stdout, terminalControl, "cancelled")
 		return 0
 	}
-	fmt.Fprintf(stdout, "selected agent: %s\n", agent.Value)
+	writeTUILine(stdout, terminalControl, "selected agent: %s", agent.Value)
 	actions := actionsForAgent(agent.Value)
-	action, ok := selectTUIChoice(reader, stdout, "Select action", actions)
+	action, ok := selectTUIChoice(reader, stdout, "Select action", actions, terminalControl)
 	if !ok {
-		fmt.Fprintln(stdout, "cancelled")
+		writeTUILine(stdout, terminalControl, "cancelled")
 		return 0
 	}
-	fmt.Fprintf(stdout, "selected action: %s\n", action.Value)
+	writeTUILine(stdout, terminalControl, "selected action: %s", action.Value)
 
 	cmdArgs := commandArgsForTUIAction(agent.Value, action.Value)
 	if len(cmdArgs) == 0 {
 		fmt.Fprintf(stderr, "action %q is not available for %s\n", action.Value, agent.Value)
 		return 2
 	}
-	fmt.Fprintf(stdout, "dry-run: agentctl %s\n", strings.Join(cmdArgs, " "))
+	writeTUILine(stdout, terminalControl, "dry-run: agentctl %s", strings.Join(cmdArgs, " "))
 	if dryRun {
 		return 0
 	}
 	if isMutationAction(action.Value) {
 		fmt.Fprint(stdout, "Type y to continue: ")
-		answer, _ := bufio.NewReader(stdin).ReadString('\n')
-		if strings.ToLower(strings.TrimSpace(answer)) != "y" {
-			fmt.Fprintln(stdout, "cancelled")
+		if !readTUIConfirmation(reader, stdout, terminalControl) {
+			writeTUILine(stdout, terminalControl, "cancelled")
 			return 0
 		}
 	}
+	restoreTerminal()
 	return RunWithIO(cmdArgs, stdin, stdout, stderr)
+}
+
+func outputIsTerminal(stdout io.Writer) bool {
+	file, ok := stdout.(*os.File)
+	return ok && term.IsTerminal(int(file.Fd()))
+}
+
+func writeTUILine(stdout io.Writer, terminalControl bool, format string, args ...any) {
+	fmt.Fprintf(stdout, format, args...)
+	if terminalControl {
+		fmt.Fprint(stdout, "\r\n")
+		return
+	}
+	fmt.Fprint(stdout, "\n")
+}
+
+func readTUIConfirmation(reader *bufio.Reader, stdout io.Writer, terminalControl bool) bool {
+	for {
+		b, err := reader.ReadByte()
+		if err != nil {
+			writeTUILine(stdout, terminalControl, "")
+			return false
+		}
+		switch b {
+		case 'y', 'Y':
+			writeTUILine(stdout, terminalControl, "y")
+			return true
+		case 'n', 'N', 'q', 'Q', 0x03, 0x04, 0x1b:
+			writeTUILine(stdout, terminalControl, "")
+			return false
+		case '\r', '\n', ' ', '\t':
+			continue
+		default:
+			writeTUILine(stdout, terminalControl, "")
+			return false
+		}
+	}
 }
 
 func actionsForAgent(agent string) []tuiChoice {
@@ -1306,20 +1354,25 @@ func isMutationAction(action string) bool {
 	}
 }
 
-func selectTUIChoice(reader *bufio.Reader, stdout io.Writer, title string, choices []tuiChoice) (tuiChoice, bool) {
+func selectTUIChoice(reader *bufio.Reader, stdout io.Writer, title string, choices []tuiChoice, terminalControl bool) (tuiChoice, bool) {
 	if len(choices) == 0 {
 		return tuiChoice{}, false
 	}
 	selected := 0
+	previousMenuLines := 0
 	for {
-		fmt.Fprintf(stdout, "== %s ==\n", title)
+		if terminalControl && previousMenuLines > 0 {
+			fmt.Fprintf(stdout, "\x1b[%dF\x1b[J", previousMenuLines)
+		}
+		writeTUILine(stdout, terminalControl, "== %s ==", title)
 		for i, choice := range choices {
 			prefix := "  "
 			if i == selected {
 				prefix = "> "
 			}
-			fmt.Fprintf(stdout, "%s%s\n", prefix, choice.Label)
+			writeTUILine(stdout, terminalControl, "%s%s", prefix, choice.Label)
 		}
+		previousMenuLines = len(choices) + 1
 		key, ok := readTUIKey(reader)
 		if !ok {
 			return choices[selected], true
@@ -1347,6 +1400,8 @@ func readTUIKey(reader *bufio.Reader) (string, bool) {
 		return "enter", false
 	}
 	switch b {
+	case 0x03, 0x04:
+		return "quit", true
 	case 'q', 'Q':
 		return "quit", true
 	case 'j', 'J', 's', 'S', 'n', 'N':
