@@ -242,6 +242,28 @@ func TestBubbleTUIAgentActionModelCancelsOnControlC(t *testing.T) {
 	}
 }
 
+func TestBubbleTUIConfirmModelAcceptsEnterAndY(t *testing.T) {
+	for _, msg := range []tea.KeyMsg{{Type: tea.KeyEnter}, {Type: tea.KeyRunes, Runes: []rune{'y'}}} {
+		model := newBubbleTUIConfirmModel("claude", "update")
+		updated, _ := model.Update(msg)
+		model = updated.(bubbleTUIConfirmModel)
+		if !model.confirmed || model.cancelled {
+			t.Fatalf("confirmation after %v = confirmed %v cancelled %v; want confirmed only", msg, model.confirmed, model.cancelled)
+		}
+	}
+}
+
+func TestBubbleTUIConfirmModelCancelsOnNQAndControlC(t *testing.T) {
+	for _, msg := range []tea.KeyMsg{{Type: tea.KeyRunes, Runes: []rune{'n'}}, {Type: tea.KeyRunes, Runes: []rune{'q'}}, {Type: tea.KeyCtrlC}} {
+		model := newBubbleTUIConfirmModel("claude", "update")
+		updated, _ := model.Update(msg)
+		model = updated.(bubbleTUIConfirmModel)
+		if model.confirmed || !model.cancelled {
+			t.Fatalf("confirmation after %v = confirmed %v cancelled %v; want cancelled only", msg, model.confirmed, model.cancelled)
+		}
+	}
+}
+
 func TestSelectTUIChoiceTerminalControlUsesCRLFAndRedraw(t *testing.T) {
 	var stdout bytes.Buffer
 	reader := bufio.NewReader(strings.NewReader("j\r"))

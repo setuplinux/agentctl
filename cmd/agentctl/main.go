@@ -1261,10 +1261,23 @@ func runTUI(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) 
 		return 0
 	}
 	if isMutationAction(action.Value) {
-		fmt.Fprint(stdout, "Type y to continue: ")
-		if !readTUIConfirmation(reader, stdout, terminalControl) {
-			writeTUILine(stdout, terminalControl, "cancelled")
-			return 0
+		if interactiveTUI {
+			ok, err := confirmTUIActionBubbleTea(stdin, stdout, agent.Value, action.Value)
+			if err != nil {
+				fmt.Fprintf(stdout, "Bubble Tea confirmation failed (%v); falling back to basic confirmation.\n", err)
+				fmt.Fprint(stdout, "Type y to continue: ")
+				ok = readTUIConfirmation(reader, stdout, terminalControl)
+			}
+			if !ok {
+				writeTUILine(stdout, terminalControl, "cancelled")
+				return 0
+			}
+		} else {
+			fmt.Fprint(stdout, "Type y to continue: ")
+			if !readTUIConfirmation(reader, stdout, terminalControl) {
+				writeTUILine(stdout, terminalControl, "cancelled")
+				return 0
+			}
 		}
 	}
 	restoreTerminal()
@@ -1415,6 +1428,17 @@ func selectTUIAgentActionBubbleTea(stdin io.Reader, stdout io.Writer, agentChoic
 	return final.agent, final.action, true, nil
 }
 
+func confirmTUIActionBubbleTea(stdin io.Reader, stdout io.Writer, agent string, action string) (bool, error) {
+	model := newBubbleTUIConfirmModel(agent, action)
+	program := tea.NewProgram(model, bubbleTeaProgramOptions(stdin, stdout)...)
+	finalModel, err := program.Run()
+	if err != nil {
+		return false, err
+	}
+	final, ok := finalModel.(bubbleTUIConfirmModel)
+	return ok && final.confirmed, nil
+}
+
 func bubbleTeaProgramOptions(stdin io.Reader, stdout io.Writer) []tea.ProgramOption {
 	options := []tea.ProgramOption{tea.WithOutput(stdout)}
 	if file, ok := stdin.(*os.File); ok && term.IsTerminal(int(file.Fd())) {
@@ -1426,6 +1450,48 @@ func bubbleTeaProgramOptions(stdin io.Reader, stdout io.Writer) []tea.ProgramOpt
 		options = append(options, tea.WithInput(stdin))
 	}
 	return options
+}
+
+type bubbleTUIConfirmModel struct {
+	agent     string
+	action    string
+	confirmed bool
+	cancelled bool
+}
+
+func newBubbleTUIConfirmModel(agent string, action string) bubbleTUIConfirmModel {
+	return bubbleTUIConfirmModel{agent: agent, action: action}
+}
+
+func (m bubbleTUIConfirmModel) Init() tea.Cmd {
+	return nil
+}
+
+func (m bubbleTUIConfirmModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.Type {
+		case tea.KeyCtrlC, tea.KeyEsc:
+			m.cancelled = true
+			return m, tea.Quit
+		case tea.KeyEnter:
+			m.confirmed = true
+			return m, tea.Quit
+		}
+		switch msg.String() {
+		case "y", "Y":
+			m.confirmed = true
+			return m, tea.Quit
+		case "n", "N", "q", "Q":
+			m.cancelled = true
+			return m, tea.Quit
+		}
+	}
+	return m, nil
+}
+
+func (m bubbleTUIConfirmModel) View() string {
+	return fmt.Sprintf("Run agentctl %s %s?\n\nEnter/y continue • n/q cancel\n", m.action, m.agent)
 }
 
 type bubbleTUIAgentActionModel struct {
