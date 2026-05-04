@@ -39,6 +39,8 @@ func RunWithIO(args []string, stdin io.Reader, stdout io.Writer, stderr io.Write
 		return runTUI(args[1:], stdin, stdout, stderr)
 	case "bundle":
 		return runBundle(args[1:], stdout, stderr)
+	case "backup":
+		return runBackup(args[1:], stdout, stderr)
 	case "list":
 		return runList(stdout)
 	case "status":
@@ -199,6 +201,16 @@ func runRollback(args []string, stdout io.Writer, stderr io.Writer) int {
 		return 2
 	}
 	return openClawRollback(stdout, stderr)
+}
+
+func runBackup(args []string, stdout io.Writer, stderr io.Writer) int {
+	name := agentName(args)
+	if name != "openclaw" {
+		fmt.Fprintf(stderr, "usage: agentctl backup openclaw\n")
+		return 2
+	}
+	_, code := createOpenClawRollbackSnapshot(stdout, stderr)
+	return code
 }
 
 func runInstall(args []string, stdout io.Writer, stderr io.Writer) int {
@@ -494,12 +506,14 @@ foreach ($root in $roots) {
     ForEach-Object {
       Write-Host "== $($_.FullName) =="
       Get-Content -Path $_.FullName -Tail 200 -ErrorAction SilentlyContinue |
-        Select-String -Pattern "error|fail|timeout|reject|crash|stability|ciao|bonjour|probing|json5|Cannot find package|telegram|active=|queued=" |
+        Select-String -Pattern "error|fail|timeout|reject|crash|stability|ciao|bonjour|probing|json5|Cannot find package|active=|queued=" |
         Select-Object -Last 120 |
         ForEach-Object { $_.Line -replace 'bot[0-9]+:[^/ ]+', 'bot[REDACTED]' }
     }
 }
 `
+
+const linuxOpenClawActionableLogsScript = "journalctl --user -u openclaw-gateway --since '30 minutes ago' --no-pager | grep -Ei 'error|fail|timeout|reject|crash|stability|ciao|bonjour|probing|json5|Cannot find package|active=|queued=' | sed -E 's#bot[0-9]+:[^/ ]+#bot[REDACTED]#g' | tail -120 || true"
 
 const windowsOpenClawStopGatewayScript = `
 $ErrorActionPreference = "Continue"
@@ -582,7 +596,7 @@ func openClawDoctor(stdout io.Writer, stderr io.Writer) int {
 	if runtime.GOOS == "windows" {
 		_ = runLogged(stdout, stderr, 45*time.Second, "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", windowsOpenClawRecentLogsScript)
 	} else {
-		_ = runShell(stdout, stderr, 45*time.Second, "journalctl --user -u openclaw-gateway --since '30 minutes ago' --no-pager | grep -Ei 'error|fail|timeout|reject|crash|stability|ciao|bonjour|probing|json5|Cannot find package|telegram|active=|queued=' | sed -E 's#bot[0-9]+:[^/ ]+#bot[REDACTED]#g' | tail -120 || true")
+		_ = runShell(stdout, stderr, 45*time.Second, linuxOpenClawActionableLogsScript)
 	}
 	return code
 }
@@ -832,7 +846,7 @@ func openClawGatewayRpcOk() bool {
 func patchOpenClawFrontmatterImports(root string) error {
 	frontmatter := filepath.Join(root, "dist", "frontmatter-Cc-V8aI2.js")
 	if !fileExists(frontmatter) {
-		return fmt.Errorf("frontmatter bundle not found: %s", frontmatter)
+		return nil
 	}
 	json5Path := "/usr/lib/node_modules/openclaw/node_modules/json5/lib/index.js"
 	yamlPath := "/usr/lib/node_modules/openclaw/node_modules/yaml/dist/index.js"
@@ -1235,6 +1249,7 @@ func actionsForAgent(agent string) []tuiChoice {
 	}
 	if agent == "openclaw" {
 		actions = append(actions,
+			tuiChoice{Label: "Backup rollback snapshot", Value: "backup"},
 			tuiChoice{Label: "Fix common gateway/update breakage", Value: "fix"},
 			tuiChoice{Label: "Logs", Value: "logs"},
 			tuiChoice{Label: "Rollback", Value: "rollback"},
@@ -1253,7 +1268,7 @@ func commandArgsForTUIAction(agent string, action string) []string {
 		return []string{"install", agent}
 	case "bundle":
 		return []string{"bundle", agent}
-	case "fix", "logs", "rollback":
+	case "backup", "fix", "logs", "rollback":
 		if agent == "openclaw" {
 			return []string{action, agent}
 		}
@@ -1263,7 +1278,7 @@ func commandArgsForTUIAction(agent string, action string) []string {
 
 func isMutationAction(action string) bool {
 	switch action {
-	case "install", "update", "fix", "rollback":
+	case "install", "update", "backup", "fix", "rollback":
 		return true
 	default:
 		return false
@@ -1451,6 +1466,7 @@ func printHelp(w io.Writer) {
 	fmt.Fprintln(w, "  agentctl setup")
 	fmt.Fprintln(w, "  agentctl doctor <agent|all>")
 	fmt.Fprintln(w, "  agentctl bundle <agent|all>")
+	fmt.Fprintln(w, "  agentctl backup openclaw")
 	fmt.Fprintln(w, "  agentctl update <agent|all>")
 	fmt.Fprintln(w, "  agentctl uninstall <agent|all>")
 	fmt.Fprintln(w, "  agentctl version")
@@ -1463,6 +1479,7 @@ func printHelp(w io.Writer) {
 	fmt.Fprintln(w, "  agentctl status")
 	fmt.Fprintln(w, "  agentctl install aionui")
 	fmt.Fprintln(w, "  agentctl update all")
+	fmt.Fprintln(w, "  agentctl backup openclaw")
 	fmt.Fprintln(w, "  agentctl uninstall codex")
 	fmt.Fprintln(w, "  agentctl doctor openclaw")
 }

@@ -27,6 +27,31 @@ func TestRunListPrintsSupportedAgents(t *testing.T) {
 	}
 }
 
+func TestRunBackupRejectsNonOpenClawAgents(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	exitCode := Run([]string{"backup", "codex"}, &stdout, &stderr)
+	if exitCode != 2 {
+		t.Fatalf("exitCode = %d, want 2", exitCode)
+	}
+	if !strings.Contains(stderr.String(), "usage: agentctl backup openclaw") {
+		t.Fatalf("stderr missing backup usage: %s", stderr.String())
+	}
+}
+
+func TestOpenClawActionableLogFiltersDoNotMatchRawTelegramMessages(t *testing.T) {
+	for _, haystack := range []string{windowsOpenClawRecentLogsScript, linuxOpenClawActionableLogsScript} {
+		if strings.Contains(haystack, "|telegram|") || strings.Contains(haystack, "|telegram'") || strings.Contains(haystack, "|telegram|") {
+			t.Fatalf("actionable log filter still matches raw telegram log lines: %s", haystack)
+		}
+	}
+}
+
+func TestPatchOpenClawFrontmatterImportsSkipsMissingBundle(t *testing.T) {
+	if err := patchOpenClawFrontmatterImports(t.TempDir()); err != nil {
+		t.Fatalf("missing frontmatter bundle should be skipped, got error: %v", err)
+	}
+}
+
 func TestRunCommandSpecForAgentUsesDetectedPathForAgentExecutable(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	spec := &agents.CommandSpec{Program: "echo", Args: []string{"detected-path-used"}}
@@ -98,7 +123,7 @@ func TestRunHelpShowsUsageExamplesAndUninstall(t *testing.T) {
 		t.Fatalf("exitCode = %d, want 0; stderr=%s", exitCode, stderr.String())
 	}
 	out := stdout.String()
-	for _, want := range []string{"agentctl tui", "agentctl bundle <agent|all>", "agentctl uninstall <agent|all>", "agentctl version", "Examples:", "agentctl tui --dry-run", "agentctl install aionui", "agentctl update all", "agentctl uninstall codex"} {
+	for _, want := range []string{"agentctl tui", "agentctl bundle <agent|all>", "agentctl backup openclaw", "agentctl uninstall <agent|all>", "agentctl version", "Examples:", "agentctl tui --dry-run", "agentctl install aionui", "agentctl update all", "agentctl uninstall codex"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("help output missing %q: %s", want, out)
 		}
