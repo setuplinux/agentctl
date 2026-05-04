@@ -16,9 +16,22 @@ import (
 	"time"
 
 	"github.com/setuplinux/agentctl/internal/agents"
+	"golang.org/x/term"
 )
 
 var version = "dev"
+
+var makeTerminalRaw = func(file *os.File) (func(), error) {
+	fd := int(file.Fd())
+	if !term.IsTerminal(fd) {
+		return func() {}, nil
+	}
+	oldState, err := term.MakeRaw(fd)
+	if err != nil {
+		return nil, err
+	}
+	return func() { _ = term.Restore(fd, oldState) }, nil
+}
 
 func main() {
 	os.Exit(RunWithIO(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
@@ -1187,8 +1200,16 @@ func runTUI(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) 
 			dryRun = true
 		}
 	}
+	if file, ok := stdin.(*os.File); ok {
+		restore, err := makeTerminalRaw(file)
+		if err != nil {
+			fmt.Fprintf(stderr, "warning: could not enable raw terminal mode: %v\n", err)
+		} else {
+			defer restore()
+		}
+	}
 	fmt.Fprintln(stdout, "agentctl operations console")
-	fmt.Fprintln(stdout, "Use ↑/↓ arrows, Enter to select, q to quit.")
+	fmt.Fprintln(stdout, "Use ↑/↓ arrows, j/k, or n/p to move; Enter to select; q to quit.")
 	if dryRun {
 		fmt.Fprintln(stdout, "mode: dry-run (no installer, updater, fix, or rollback command will execute)")
 	}
@@ -1328,6 +1349,10 @@ func readTUIKey(reader *bufio.Reader) (string, bool) {
 	switch b {
 	case 'q', 'Q':
 		return "quit", true
+	case 'j', 'J', 's', 'S', 'n', 'N':
+		return "down", true
+	case 'k', 'K', 'w', 'W', 'p', 'P':
+		return "up", true
 	case '\r', '\n':
 		return "enter", true
 	case 0x1b:

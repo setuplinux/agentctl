@@ -162,6 +162,70 @@ func TestRunTUIDryRunArrowSelectsOpenClawUpdateWithoutExecuting(t *testing.T) {
 	}
 }
 
+func TestRunTUIDryRunViKeysSelectOpenClawUpdateWithoutExecuting(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	input := strings.NewReader("j\rj\r")
+	exitCode := RunWithIO([]string{"tui", "--dry-run"}, input, &stdout, &stderr)
+
+	if exitCode != 0 {
+		t.Fatalf("exitCode = %d, want 0; stderr=%s", exitCode, stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{"selected agent: openclaw", "selected action: update", "dry-run: agentctl update openclaw"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("tui dry-run vi-key output missing %q: %s", want, out)
+		}
+	}
+}
+
+func TestRunTUIEnablesRawModeForFileInput(t *testing.T) {
+	oldRaw := makeTerminalRaw
+	defer func() { makeTerminalRaw = oldRaw }()
+
+	called := false
+	restored := false
+	makeTerminalRaw = func(file *os.File) (func(), error) {
+		called = true
+		return func() { restored = true }, nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	exitCode := RunWithIO([]string{"tui", "--dry-run"}, strings.NewReader("q"), &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("string reader exitCode = %d, want 0; stderr=%s", exitCode, stderr.String())
+	}
+	if called || restored {
+		t.Fatalf("raw mode should not be enabled for non-file input; called=%v restored=%v", called, restored)
+	}
+
+	called = false
+	restored = false
+	file, err := os.CreateTemp(t.TempDir(), "stdin")
+	if err != nil {
+		t.Fatalf("CreateTemp() error = %v", err)
+	}
+	defer file.Close()
+	if _, err := file.WriteString("q"); err != nil {
+		t.Fatalf("WriteString() error = %v", err)
+	}
+	if _, err := file.Seek(0, 0); err != nil {
+		t.Fatalf("Seek() error = %v", err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	exitCode = RunWithIO([]string{"tui", "--dry-run"}, file, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("file reader exitCode = %d, want 0; stderr=%s", exitCode, stderr.String())
+	}
+	if !called {
+		t.Fatalf("raw mode was not enabled for file input")
+	}
+	if !restored {
+		t.Fatalf("raw mode restore function was not called")
+	}
+}
+
 func TestRunBundleCreatesRedactedSupportBundle(t *testing.T) {
 	tempHome := t.TempDir()
 	t.Setenv("HOME", tempHome)
