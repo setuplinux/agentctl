@@ -424,6 +424,94 @@ func titleCase(value string) string {
 	return strings.ToUpper(value[:1]) + value[1:]
 }
 
+const windowsOpenClawServiceStatusScript = `
+$ErrorActionPreference = "Continue"
+Write-Host "scheduled tasks:"
+schtasks /Query /FO LIST /V | Select-String -Pattern "OpenClaw|TaskName|Status|Last Run Time|Last Result" | ForEach-Object { $_.Line }
+Write-Host "port 18789 listeners:"
+Get-NetTCPConnection -LocalPort 18789 -ErrorAction SilentlyContinue |
+  Select-Object -Property LocalAddress,LocalPort,State,OwningProcess |
+  Format-Table -AutoSize | Out-String | Write-Host
+Get-NetTCPConnection -LocalPort 18789 -ErrorAction SilentlyContinue |
+  Select-Object -ExpandProperty OwningProcess -Unique |
+  ForEach-Object { Get-CimInstance Win32_Process -Filter "ProcessId=$_" | Select-Object ProcessId,Name,CommandLine } |
+  Format-List | Out-String | Write-Host
+`
+
+const windowsOpenClawRecentLogsScript = `
+$ErrorActionPreference = "Continue"
+$roots = @(
+  (Join-Path $env:TEMP "openclaw"),
+  (Join-Path $env:LOCALAPPDATA "Temp\openclaw"),
+  "\tmp\openclaw"
+) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
+foreach ($root in $roots) {
+  Get-ChildItem -Path $root -Filter "*.log" -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending |
+    Select-Object -First 3 |
+    ForEach-Object {
+      Write-Host "== $($_.FullName) =="
+      Get-Content -Path $_.FullName -Tail 200 -ErrorAction SilentlyContinue |
+        Select-String -Pattern "error|fail|timeout|reject|crash|stability|ciao|bonjour|probing|json5|Cannot find package|telegram|active=|queued=" |
+        Select-Object -Last 120 |
+        ForEach-Object { $_.Line -replace 'bot[0-9]+:[^/ ]+', 'bot[REDACTED]' }
+    }
+}
+`
+
+const windowsOpenClawStopGatewayScript = `
+$ErrorActionPreference = "Continue"
+schtasks /End /TN "OpenClaw Gateway" 2>$null | Out-Null
+schtasks /End /TN "openclaw-gateway" 2>$null | Out-Null
+Get-CimInstance Win32_Process -Filter "name = 'node.exe'" -ErrorAction SilentlyContinue |
+  Where-Object { $_.CommandLine -match 'openclaw' -and $_.CommandLine -match 'gateway' } |
+  ForEach-Object { Write-Host "stop openclaw gateway node pid=$($_.ProcessId)"; Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+Get-NetTCPConnection -LocalPort 18789 -ErrorAction SilentlyContinue |
+  Select-Object -ExpandProperty OwningProcess -Unique |
+  ForEach-Object { Write-Host "stop port 18789 owner pid=$_"; Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
+Start-Sleep -Seconds 2
+`
+
+const windowsOpenClawRepairInstallScript = `
+$ErrorActionPreference = "Stop"
+function Add-ProcessPath([string]$Dir) {
+  if (-not $Dir -or -not (Test-Path $Dir)) { return }
+  $parts = @()
+  if ($env:PATH) { $parts = $env:PATH -split ';' | Where-Object { $_ } }
+  foreach ($part in $parts) {
+    if ($part.TrimEnd('\') -ieq $Dir.TrimEnd('\')) { return }
+  }
+  $env:PATH = "$Dir;$env:PATH"
+}
+Add-ProcessPath (Join-Path $env:ProgramFiles "nodejs")
+Add-ProcessPath (Join-Path $env:APPDATA "npm")
+$npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
+if (-not $npm) { $npm = Get-Command npm -ErrorAction SilentlyContinue }
+if (-not $npm) { throw "npm is required to repair OpenClaw. Install Node.js LTS, then rerun agentctl fix openclaw." }
+$prefix = (& $npm.Path config get prefix).Trim()
+if (-not $prefix) { $prefix = Join-Path $env:APPDATA "npm" }
+$nodeModules = Join-Path $prefix "node_modules"
+$openclawDir = Join-Path $nodeModules "openclaw"
+$stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+Write-Host "npm prefix: $prefix"
+if (Test-Path $openclawDir) {
+  $backup = "$openclawDir.agentctl-broken-$stamp"
+  Write-Host "quarantine: $openclawDir -> $backup"
+  Move-Item -Path $openclawDir -Destination $backup -Force
+}
+Get-ChildItem -Path $nodeModules -Filter ".openclaw-*" -ErrorAction SilentlyContinue |
+  ForEach-Object { Write-Host "cleanup: $($_.FullName)"; Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+& $npm.Path install -g openclaw@latest --no-fund --no-audit --loglevel=error
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$openclaw = Get-Command openclaw.cmd -ErrorAction SilentlyContinue
+if (-not $openclaw) { $openclaw = Get-Command openclaw -ErrorAction SilentlyContinue }
+if (-not $openclaw) { throw "OpenClaw installed but openclaw.cmd is not visible on PATH" }
+& $openclaw.Path --version
+& $openclaw.Path gateway install
+& $openclaw.Path gateway start
+exit 0
+`
+
 func openClawDoctor(stdout io.Writer, stderr io.Writer) int {
 	fmt.Fprintln(stdout, "== OpenClaw version ==")
 	code := runLogged(stdout, stderr, 30*time.Second, "openclaw", "--version")
@@ -433,8 +521,12 @@ func openClawDoctor(stdout io.Writer, stderr io.Writer) int {
 		code = c
 	}
 
-	fmt.Fprintln(stdout, "\n== OpenClaw gateway systemd ==")
-	_ = runLogged(stdout, stderr, 30*time.Second, "systemctl", "--user", "show", "openclaw-gateway", "-p", "MainPID", "-p", "NRestarts", "-p", "ActiveState", "-p", "SubState", "-p", "ExecMainStatus", "-p", "MemoryCurrent")
+	fmt.Fprintln(stdout, "\n== OpenClaw gateway service ==")
+	if runtime.GOOS == "windows" {
+		_ = runLogged(stdout, stderr, 30*time.Second, "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", windowsOpenClawServiceStatusScript)
+	} else {
+		_ = runLogged(stdout, stderr, 30*time.Second, "systemctl", "--user", "show", "openclaw-gateway", "-p", "MainPID", "-p", "NRestarts", "-p", "ActiveState", "-p", "SubState", "-p", "ExecMainStatus", "-p", "MemoryCurrent")
+	}
 
 	fmt.Fprintln(stdout, "\n== OpenClaw gateway RPC ==")
 	if c := runLoggedEnv(stdout, stderr, 75*time.Second, []string{"OPENCLAW_RPC_TIMEOUT=30000"}, "openclaw", "gateway", "status", "--json"); c != 0 {
@@ -445,7 +537,11 @@ func openClawDoctor(stdout io.Writer, stderr io.Writer) int {
 	}
 
 	fmt.Fprintln(stdout, "\n== Recent actionable gateway log lines ==")
-	_ = runShell(stdout, stderr, 45*time.Second, "journalctl --user -u openclaw-gateway --since '30 minutes ago' --no-pager | grep -Ei 'error|fail|timeout|reject|crash|stability|ciao|bonjour|probing|json5|Cannot find package|telegram|active=|queued=' | sed -E 's#bot[0-9]+:[^/ ]+#bot[REDACTED]#g' | tail -120 || true")
+	if runtime.GOOS == "windows" {
+		_ = runLogged(stdout, stderr, 45*time.Second, "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", windowsOpenClawRecentLogsScript)
+	} else {
+		_ = runShell(stdout, stderr, 45*time.Second, "journalctl --user -u openclaw-gateway --since '30 minutes ago' --no-pager | grep -Ei 'error|fail|timeout|reject|crash|stability|ciao|bonjour|probing|json5|Cannot find package|telegram|active=|queued=' | sed -E 's#bot[0-9]+:[^/ ]+#bot[REDACTED]#g' | tail -120 || true")
+	}
 	return code
 }
 
@@ -464,6 +560,11 @@ func openClawUpdate(stdout io.Writer, stderr io.Writer) int {
 		return openClawDoctor(stdout, stderr)
 	}
 
+	if runtime.GOOS == "windows" {
+		fmt.Fprintln(stdout, "\n== Windows OpenClaw gateway stop ==")
+		_ = stopOpenClawWindowsGateway(stdout, stderr)
+	}
+
 	snapshot, c := createOpenClawRollbackSnapshot(stdout, stderr)
 	if c != 0 {
 		return 1
@@ -476,16 +577,16 @@ func openClawUpdate(stdout io.Writer, stderr io.Writer) int {
 	}
 
 	fixCode := openClawFix(stdout, stderr)
-	if updateCode != 0 || fixCode != 0 {
-		fmt.Fprintln(stderr, "\nupdate verification failed; attempting rollback to last known pre-update state")
-		rollbackCode := restoreOpenClawRollback(snapshot, stdout, stderr)
-		if rollbackCode != 0 {
-			return rollbackCode
-		}
+	if fixCode == 0 {
 		if updateCode != 0 {
-			return updateCode
+			fmt.Fprintln(stdout, "official updater exited non-zero, but repair and verification succeeded")
 		}
-		return fixCode
+		return 0
+	}
+	fmt.Fprintln(stderr, "\nupdate verification failed; attempting rollback to last known pre-update state")
+	rollbackCode := restoreOpenClawRollback(snapshot, stdout, stderr)
+	if rollbackCode != 0 {
+		return rollbackCode
 	}
 	return fixCode
 }
@@ -516,7 +617,38 @@ func parseOpenClawUpdateAvailability(data []byte) (available bool, checked bool,
 	return *status.Availability.Available, true, nil
 }
 
+func stopOpenClawWindowsGateway(stdout io.Writer, stderr io.Writer) int {
+	return runLogged(stdout, stderr, 90*time.Second, "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", windowsOpenClawStopGatewayScript)
+}
+
+func restartOpenClawGateway(stdout io.Writer, stderr io.Writer) int {
+	if runtime.GOOS == "windows" {
+		if c := stopOpenClawWindowsGateway(stdout, stderr); c != 0 {
+			return c
+		}
+		return runLogged(stdout, stderr, 2*time.Minute, "openclaw", "gateway", "start")
+	}
+	return runLogged(stdout, stderr, 2*time.Minute, "systemctl", "--user", "restart", "openclaw-gateway")
+}
+
+func openClawFixWindows(stdout io.Writer, stderr io.Writer) int {
+	fmt.Fprintln(stdout, "== OpenClaw Windows targeted repair ==")
+	if c := stopOpenClawWindowsGateway(stdout, stderr); c != 0 {
+		return c
+	}
+	if c := runLogged(stdout, stderr, 15*time.Minute, "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", windowsOpenClawRepairInstallScript); c != 0 {
+		return c
+	}
+	fmt.Fprintln(stdout, "repair: waiting for Windows gateway startup")
+	time.Sleep(20 * time.Second)
+	return openClawDoctor(stdout, stderr)
+}
+
 func openClawFix(stdout io.Writer, stderr io.Writer) int {
+	if runtime.GOOS == "windows" {
+		return openClawFixWindows(stdout, stderr)
+	}
+
 	fmt.Fprintln(stdout, "== OpenClaw targeted repair ==")
 
 	// Frequent post-update failure: Telegram providers crash because the plugin
@@ -959,7 +1091,7 @@ func restoreOpenClawRollback(snapshot *openClawRollbackSnapshot, stdout io.Write
 		}
 		fmt.Fprintf(stdout, "file restored: %s\n", patched.TargetPath)
 	}
-	if c := runLogged(stdout, stderr, 2*time.Minute, "systemctl", "--user", "restart", "openclaw-gateway"); c != 0 {
+	if c := restartOpenClawGateway(stdout, stderr); c != 0 {
 		return c
 	}
 	fmt.Fprintln(stdout, "rollback: waiting for startup")

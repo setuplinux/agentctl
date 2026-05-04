@@ -159,6 +159,37 @@ func TestParseOpenClawUpdateAvailability(t *testing.T) {
 	}
 }
 
+func TestWindowsOpenClawRepairScriptQuarantinesBrokenInstallAndReinstalls(t *testing.T) {
+	for _, want := range []string{
+		"Move-Item -Path $openclawDir",
+		"npm",
+		"install -g openclaw@latest",
+		"gateway install",
+		"gateway start",
+	} {
+		if !strings.Contains(windowsOpenClawRepairInstallScript, want) {
+			t.Fatalf("windows repair script missing %q:\n%s", want, windowsOpenClawRepairInstallScript)
+		}
+	}
+}
+
+func TestWindowsOpenClawScriptsAvoidLinuxOnlySystemctlJournalctlBash(t *testing.T) {
+	windowsScripts := map[string]string{
+		"service status": windowsOpenClawServiceStatusScript,
+		"recent logs":    windowsOpenClawRecentLogsScript,
+		"stop gateway":   windowsOpenClawStopGatewayScript,
+		"repair install": windowsOpenClawRepairInstallScript,
+	}
+	for name, script := range windowsScripts {
+		lower := strings.ToLower(script)
+		for _, forbidden := range []string{"systemctl", "journalctl", "bash -lc"} {
+			if strings.Contains(lower, forbidden) {
+				t.Fatalf("%s script contains Linux-only command %q:\n%s", name, forbidden, script)
+			}
+		}
+	}
+}
+
 func TestWriteAndLoadLatestOpenClawRollbackSnapshot(t *testing.T) {
 	tempHome := t.TempDir()
 	t.Setenv("HOME", tempHome)
