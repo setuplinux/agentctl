@@ -1243,18 +1243,12 @@ func runTUI(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) 
 	}
 
 	reader := bufio.NewReader(stdin)
-	agent, ok := selectTUIChoiceForRuntime(reader, stdin, stdout, "Select agent", agentChoices, terminalControl, interactiveTUI)
+	agent, action, ok := selectTUIAgentActionForRuntime(reader, stdin, stdout, agentChoices, terminalControl, interactiveTUI)
 	if !ok {
 		writeTUILine(stdout, terminalControl, "cancelled")
 		return 0
 	}
 	writeTUILine(stdout, terminalControl, "selected agent: %s", agent.Value)
-	actions := actionsForAgent(agent.Value)
-	action, ok := selectTUIChoiceForRuntime(reader, stdin, stdout, "Select action", actions, terminalControl, interactiveTUI)
-	if !ok {
-		writeTUILine(stdout, terminalControl, "cancelled")
-		return 0
-	}
 	writeTUILine(stdout, terminalControl, "selected action: %s", action.Value)
 
 	cmdArgs := commandArgsForTUIAction(agent.Value, action.Value)
@@ -1359,6 +1353,27 @@ func isMutationAction(action string) bool {
 	}
 }
 
+func selectTUIAgentActionForRuntime(reader *bufio.Reader, stdin io.Reader, stdout io.Writer, agentChoices []tuiChoice, terminalControl bool, interactiveTUI bool) (tuiChoice, tuiChoice, bool) {
+	if interactiveTUI {
+		agent, action, ok, err := selectTUIAgentActionBubbleTea(stdin, stdout, agentChoices)
+		if err != nil {
+			fmt.Fprintf(stdout, "Bubble Tea TUI failed (%v); falling back to basic selector.\n", err)
+		} else {
+			return agent, action, ok
+		}
+	}
+
+	agent, ok := selectTUIChoice(reader, stdout, "Select agent", agentChoices, terminalControl)
+	if !ok {
+		return tuiChoice{}, tuiChoice{}, false
+	}
+	action, ok := selectTUIChoice(reader, stdout, "Select action", actionsForAgent(agent.Value), terminalControl)
+	if !ok {
+		return tuiChoice{}, tuiChoice{}, false
+	}
+	return agent, action, true
+}
+
 func selectTUIChoiceForRuntime(reader *bufio.Reader, stdin io.Reader, stdout io.Writer, title string, choices []tuiChoice, terminalControl bool, interactiveTUI bool) (tuiChoice, bool) {
 	if interactiveTUI {
 		choice, ok, err := selectTUIChoiceBubbleTea(stdin, stdout, title, choices)
@@ -1373,15 +1388,7 @@ func selectTUIChoiceForRuntime(reader *bufio.Reader, stdin io.Reader, stdout io.
 
 func selectTUIChoiceBubbleTea(stdin io.Reader, stdout io.Writer, title string, choices []tuiChoice) (tuiChoice, bool, error) {
 	model := newBubbleTUISelectModel(title, choices)
-	options := []tea.ProgramOption{tea.WithOutput(stdout)}
-	if file, ok := stdin.(*os.File); ok && term.IsTerminal(int(file.Fd())) {
-		// On Windows this makes Bubble Tea read from CONIN$, which avoids the
-		// brittle raw-byte handling that caused CMD arrow keys to be echoed
-		// instead of delivered as navigation events.
-		options = append(options, tea.WithInputTTY())
-	} else {
-		options = append(options, tea.WithInput(stdin))
-	}
+	options := bubbleTeaProgramOptions(stdin, stdout)
 	program := tea.NewProgram(model, options...)
 	finalModel, err := program.Run()
 	if err != nil {
@@ -1392,6 +1399,144 @@ func selectTUIChoiceBubbleTea(stdin io.Reader, stdout io.Writer, title string, c
 		return tuiChoice{}, false, nil
 	}
 	return final.selected, true, nil
+}
+
+func selectTUIAgentActionBubbleTea(stdin io.Reader, stdout io.Writer, agentChoices []tuiChoice) (tuiChoice, tuiChoice, bool, error) {
+	model := newBubbleTUIAgentActionModel(agentChoices)
+	program := tea.NewProgram(model, bubbleTeaProgramOptions(stdin, stdout)...)
+	finalModel, err := program.Run()
+	if err != nil {
+		return tuiChoice{}, tuiChoice{}, false, err
+	}
+	final, ok := finalModel.(bubbleTUIAgentActionModel)
+	if !ok || final.cancelled || !final.done {
+		return tuiChoice{}, tuiChoice{}, false, nil
+	}
+	return final.agent, final.action, true, nil
+}
+
+func bubbleTeaProgramOptions(stdin io.Reader, stdout io.Writer) []tea.ProgramOption {
+	options := []tea.ProgramOption{tea.WithOutput(stdout)}
+	if file, ok := stdin.(*os.File); ok && term.IsTerminal(int(file.Fd())) {
+		// On Windows this makes Bubble Tea read from CONIN$, which avoids the
+		// brittle raw-byte handling that caused CMD arrow keys to be echoed
+		// instead of delivered as navigation events.
+		options = append(options, tea.WithInputTTY())
+	} else {
+		options = append(options, tea.WithInput(stdin))
+	}
+	return options
+}
+
+type bubbleTUIAgentActionModel struct {
+	agentChoices  []tuiChoice
+	actionChoices []tuiChoice
+	step          string
+	cursor        int
+	agent         tuiChoice
+	action        tuiChoice
+	done          bool
+	cancelled     bool
+}
+
+func newBubbleTUIAgentActionModel(agentChoices []tuiChoice) bubbleTUIAgentActionModel {
+	return bubbleTUIAgentActionModel{agentChoices: agentChoices, step: "agent"}
+}
+
+func (m bubbleTUIAgentActionModel) Init() tea.Cmd {
+	return nil
+}
+
+func (m bubbleTUIAgentActionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.Type {
+		case tea.KeyCtrlC, tea.KeyEsc:
+			m.cancelled = true
+			return m, tea.Quit
+		case tea.KeyUp:
+			m.moveUp()
+			return m, nil
+		case tea.KeyDown:
+			m.moveDown()
+			return m, nil
+		case tea.KeyEnter:
+			return m.selectCurrent()
+		}
+		switch msg.String() {
+		case "q", "Q":
+			m.cancelled = true
+			return m, tea.Quit
+		case "j", "J", "s", "S", "n", "N":
+			m.moveDown()
+		case "k", "K", "w", "W", "p", "P":
+			m.moveUp()
+		}
+	}
+	return m, nil
+}
+
+func (m *bubbleTUIAgentActionModel) activeChoices() []tuiChoice {
+	if m.step == "action" {
+		return m.actionChoices
+	}
+	return m.agentChoices
+}
+
+func (m *bubbleTUIAgentActionModel) moveDown() {
+	choices := m.activeChoices()
+	if len(choices) == 0 {
+		return
+	}
+	m.cursor = (m.cursor + 1) % len(choices)
+}
+
+func (m *bubbleTUIAgentActionModel) moveUp() {
+	choices := m.activeChoices()
+	if len(choices) == 0 {
+		return
+	}
+	if m.cursor == 0 {
+		m.cursor = len(choices) - 1
+		return
+	}
+	m.cursor--
+}
+
+func (m bubbleTUIAgentActionModel) selectCurrent() (tea.Model, tea.Cmd) {
+	choices := m.activeChoices()
+	if len(choices) == 0 {
+		m.cancelled = true
+		return m, tea.Quit
+	}
+	if m.step == "agent" {
+		m.agent = choices[m.cursor]
+		m.actionChoices = actionsForAgent(m.agent.Value)
+		m.cursor = 0
+		m.step = "action"
+		return m, nil
+	}
+	m.action = choices[m.cursor]
+	m.done = true
+	return m, tea.Quit
+}
+
+func (m bubbleTUIAgentActionModel) View() string {
+	var b strings.Builder
+	if m.step == "action" {
+		fmt.Fprintf(&b, "== Select action for %s ==\n", displayAgentName(m.agent.Value))
+	} else {
+		b.WriteString("== Select agent ==\n")
+	}
+	for i, choice := range m.activeChoices() {
+		prefix := "  "
+		if i == m.cursor {
+			prefix = "> "
+		}
+		fmt.Fprintf(&b, "%s%s\n", prefix, choice.Label)
+	}
+	b.WriteString("\n↑/↓ move • Enter select • q quit\n")
+	return b.String()
 }
 
 type bubbleTUISelectModel struct {

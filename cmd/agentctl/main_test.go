@@ -209,6 +209,39 @@ func TestBubbleTUISelectModelCancelsOnControlC(t *testing.T) {
 	}
 }
 
+func TestBubbleTUIAgentActionModelSelectsBothStepsInOneProgram(t *testing.T) {
+	model := newBubbleTUIAgentActionModel([]tuiChoice{
+		{Label: "Hermes", Value: "hermes"},
+		{Label: "OpenClaw", Value: "openclaw"},
+	})
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyDown})
+	model = updated.(bubbleTUIAgentActionModel)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(bubbleTUIAgentActionModel)
+	if model.step != "action" || model.agent.Value != "openclaw" || model.cursor != 0 || model.done {
+		t.Fatalf("after agent select = %+v; want action step with openclaw and cursor reset", model)
+	}
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+	model = updated.(bubbleTUIAgentActionModel)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(bubbleTUIAgentActionModel)
+	if !model.done || model.cancelled || model.action.Value != "update" {
+		t.Fatalf("final selection = %+v; want update action done", model)
+	}
+}
+
+func TestBubbleTUIAgentActionModelCancelsOnControlC(t *testing.T) {
+	model := newBubbleTUIAgentActionModel([]tuiChoice{{Label: "Hermes", Value: "hermes"}})
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	model = updated.(bubbleTUIAgentActionModel)
+	if !model.cancelled || model.done {
+		t.Fatalf("cancelled=%v done=%v, want cancelled only", model.cancelled, model.done)
+	}
+}
+
 func TestSelectTUIChoiceTerminalControlUsesCRLFAndRedraw(t *testing.T) {
 	var stdout bytes.Buffer
 	reader := bufio.NewReader(strings.NewReader("j\r"))
