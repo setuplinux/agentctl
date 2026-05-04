@@ -381,7 +381,7 @@ func runGenericAgentUpdate(name string, stdout io.Writer, stderr io.Writer) int 
 		return 1
 	}
 	fmt.Fprintf(stdout, "== Update %s ==\n", titleCase(agent.Name))
-	return runCommandSpec(stdout, stderr, 20*time.Minute, support.Update)
+	return runCommandSpecForAgent(stdout, stderr, 20*time.Minute, support.Update, agent, status)
 }
 
 func runDoctorAll(stdout io.Writer, stderr io.Writer) int {
@@ -423,6 +423,18 @@ func runCommandSpec(stdout io.Writer, stderr io.Writer, timeout time.Duration, s
 		return 2
 	}
 	return runLogged(stdout, stderr, timeout, spec.Program, spec.Args...)
+}
+
+func runCommandSpecForAgent(stdout io.Writer, stderr io.Writer, timeout time.Duration, spec *agents.CommandSpec, agent agents.Agent, status agents.Status) int {
+	if spec == nil {
+		fmt.Fprintln(stderr, "command is not configured")
+		return 2
+	}
+	program := spec.Program
+	if program == agent.Executable && status.Path != "" {
+		program = status.Path
+	}
+	return runLogged(stdout, stderr, timeout, program, spec.Args...)
 }
 
 func displayAgentName(value string) string {

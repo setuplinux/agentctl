@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/setuplinux/agentctl/internal/agents"
 )
 
 func TestRunListPrintsSupportedAgents(t *testing.T) {
@@ -21,6 +24,25 @@ func TestRunListPrintsSupportedAgents(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("list output missing %q: %s", want, out)
 		}
+	}
+}
+
+func TestRunCommandSpecForAgentUsesDetectedPathForAgentExecutable(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	spec := &agents.CommandSpec{Program: "echo", Args: []string{"detected-path-used"}}
+	agent := agents.Agent{Executable: "echo"}
+	status := agents.Status{Path: "/bin/printf"}
+
+	exitCode := runCommandSpecForAgent(&stdout, &stderr, time.Second, spec, agent, status)
+	if exitCode != 0 {
+		t.Fatalf("exitCode = %d, want 0; stderr=%s", exitCode, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "$ /bin/printf detected-path-used") {
+		t.Fatalf("stdout did not show detected path command: %s", out)
+	}
+	if !strings.Contains(out, "detected-path-used") {
+		t.Fatalf("stdout missing command output: %s", out)
 	}
 }
 
