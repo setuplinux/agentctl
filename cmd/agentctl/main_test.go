@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/setuplinux/agentctl/internal/agents"
 )
 
@@ -176,6 +177,35 @@ func TestRunTUIDryRunViKeysSelectOpenClawUpdateWithoutExecuting(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("tui dry-run vi-key output missing %q: %s", want, out)
 		}
+	}
+}
+
+func TestBubbleTUISelectModelHandlesArrowKeysAndSelection(t *testing.T) {
+	model := newBubbleTUISelectModel("Select agent", []tuiChoice{
+		{Label: "Hermes", Value: "hermes"},
+		{Label: "OpenClaw", Value: "openclaw"},
+	})
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyDown})
+	model = updated.(bubbleTUISelectModel)
+	if model.cursor != 1 {
+		t.Fatalf("cursor after down = %d, want 1", model.cursor)
+	}
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(bubbleTUISelectModel)
+	if !model.done || model.cancelled || model.selected.Value != "openclaw" {
+		t.Fatalf("selection = %+v; done=%v cancelled=%v, want openclaw done", model.selected, model.done, model.cancelled)
+	}
+}
+
+func TestBubbleTUISelectModelCancelsOnControlC(t *testing.T) {
+	model := newBubbleTUISelectModel("Select agent", []tuiChoice{{Label: "Hermes", Value: "hermes"}})
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	model = updated.(bubbleTUISelectModel)
+	if !model.cancelled || model.done {
+		t.Fatalf("cancelled=%v done=%v, want cancelled only", model.cancelled, model.done)
 	}
 }
 
