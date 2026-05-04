@@ -455,6 +455,15 @@ func openClawUpdate(stdout io.Writer, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "preflight reported issues; continuing with official updater, then fix/verify")
 	}
 
+	available, checked, err := openClawUpdateAvailable()
+	if err != nil {
+		fmt.Fprintf(stderr, "update availability check failed; continuing with official updater: %v\n", err)
+	} else if checked && !available {
+		fmt.Fprintln(stdout, "\n== Official OpenClaw update ==")
+		fmt.Fprintln(stdout, "skip: OpenClaw registry reports no update available")
+		return openClawDoctor(stdout, stderr)
+	}
+
 	snapshot, c := createOpenClawRollbackSnapshot(stdout, stderr)
 	if c != 0 {
 		return 1
@@ -479,6 +488,32 @@ func openClawUpdate(stdout io.Writer, stderr io.Writer) int {
 		return fixCode
 	}
 	return fixCode
+}
+
+func openClawUpdateAvailable() (available bool, checked bool, err error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "openclaw", "update", "status", "--json")
+	out, err := cmd.Output()
+	if err != nil {
+		return false, false, err
+	}
+	return parseOpenClawUpdateAvailability(out)
+}
+
+func parseOpenClawUpdateAvailability(data []byte) (available bool, checked bool, err error) {
+	var status struct {
+		Availability struct {
+			Available *bool `json:"available"`
+		} `json:"availability"`
+	}
+	if err := json.Unmarshal(data, &status); err != nil {
+		return false, false, err
+	}
+	if status.Availability.Available == nil {
+		return false, false, nil
+	}
+	return *status.Availability.Available, true, nil
 }
 
 func openClawFix(stdout io.Writer, stderr io.Writer) int {

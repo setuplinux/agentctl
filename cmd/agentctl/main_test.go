@@ -107,6 +107,58 @@ func TestRunRollbackRequiresOpenClawTarget(t *testing.T) {
 	}
 }
 
+func TestParseOpenClawUpdateAvailability(t *testing.T) {
+	tests := []struct {
+		name        string
+		json        string
+		wantAvail   bool
+		wantChecked bool
+		wantErr     bool
+	}{
+		{
+			name:        "available false",
+			json:        `{"availability":{"available":false}}`,
+			wantAvail:   false,
+			wantChecked: true,
+		},
+		{
+			name:        "available true",
+			json:        `{"availability":{"available":true}}`,
+			wantAvail:   true,
+			wantChecked: true,
+		},
+		{
+			name:        "missing availability",
+			json:        `{"update":{"root":"/tmp/openclaw"}}`,
+			wantAvail:   false,
+			wantChecked: false,
+		},
+		{
+			name:    "invalid json",
+			json:    `{`,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotAvail, gotChecked, err := parseOpenClawUpdateAvailability([]byte(tt.json))
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("parseOpenClawUpdateAvailability() err = nil, want error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseOpenClawUpdateAvailability() err = %v", err)
+			}
+			if gotAvail != tt.wantAvail || gotChecked != tt.wantChecked {
+				t.Fatalf("parseOpenClawUpdateAvailability() = (%v, %v), want (%v, %v)", gotAvail, gotChecked, tt.wantAvail, tt.wantChecked)
+			}
+		})
+	}
+}
+
 func TestWriteAndLoadLatestOpenClawRollbackSnapshot(t *testing.T) {
 	tempHome := t.TempDir()
 	t.Setenv("HOME", tempHome)
