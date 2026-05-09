@@ -79,9 +79,8 @@ agentctl status
 agentctl install <agent|all>
 agentctl setup
 agentctl doctor <agent|all>
-agentctl update <agent|all>
+agentctl update <agent|all> [--exclude agent1,agent2]
 agentctl uninstall <agent|all>
-agentctl remove <agent|all>
 agentctl version
 agentctl help
 ```
@@ -143,6 +142,13 @@ Avoid broad updates unless the user asked for them and the risk is acceptable:
 agentctl update all
 ```
 
+If the user wants "everything except" one or two agents, use `--exclude`:
+
+```bash
+agentctl update all --exclude codex
+agentctl update all --exclude codex,gemini
+```
+
 Never run destructive commands without explicit user approval:
 
 ```bash
@@ -170,7 +176,12 @@ OpenClaw:
 ```bash
 openclaw --version
 openclaw gateway status --json
+agentctl fix openclaw
+agentctl backup openclaw
+agentctl rollback openclaw
 ```
+
+On native Windows, `agentctl logs openclaw` is not wired up yet because it relies on `journalctl`; prefer `agentctl doctor openclaw` there, or run the logs command from WSL/Linux.
 
 Hermes:
 
@@ -194,7 +205,7 @@ Do not use `AionUi --version` for status checks; Electron may launch app behavio
 
 `install.ps1` installs `agentctl.exe` under the user profile and updates user/current-session PATH where possible.
 
-On a clean Windows install, `agentctl.exe` itself does not require Node.js or npm. Agents installed through npm packages, such as Codex and Gemini CLI, need npm; `agentctl install codex` and `agentctl install gemini` try to install Node.js LTS with `winget` first when npm is missing.
+On a clean Windows install, `agentctl.exe` itself does not require Node.js or npm. Agents installed through npm packages, such as Codex and Gemini CLI, need npm; `agentctl install codex`, `agentctl update codex`, `agentctl install gemini`, and `agentctl update gemini` try to install Node.js LTS with `winget` first when npm is missing.
 
 AionUi may install to:
 

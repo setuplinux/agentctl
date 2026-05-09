@@ -58,7 +58,7 @@ agentctl status
 agentctl install <agent|all>
 agentctl setup
 agentctl doctor <agent|all>
-agentctl update <agent|all>
+agentctl update <agent|all> [--exclude agent1,agent2]
 agentctl uninstall <agent|all>
 agentctl version
 agentctl fix openclaw
@@ -72,6 +72,7 @@ agentctl rollback openclaw
 - `install` runs the official installer path for the target agent on the current platform.
 - `setup` installs only missing agents and skips anything already installed.
 - `update` prefers each agent's own update command instead of replacing upstream lifecycle logic.
+- `update all --exclude codex` skips selected installed agents during a broad update pass.
 - `uninstall` delegates to each agent's official uninstall command or package-manager removal path where available.
 - `version` prints the `agentctl` binary version. Release builds embed the git tag.
 - `rollback` currently restores OpenClaw config and patched bundle files, not a full prior package version.
@@ -93,6 +94,7 @@ agentctl status
 agentctl install aionui
 agentctl install gemini
 agentctl update all
+agentctl update all --exclude codex
 agentctl uninstall codex
 agentctl doctor openclaw
 ```

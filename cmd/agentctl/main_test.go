@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -58,14 +59,21 @@ func TestRunCommandSpecForAgentUsesDetectedPathForAgentExecutable(t *testing.T) 
 	var stdout, stderr bytes.Buffer
 	spec := &agents.CommandSpec{Program: "echo", Args: []string{"detected-path-used"}}
 	agent := agents.Agent{Executable: "echo"}
-	status := agents.Status{Path: "/bin/printf"}
+	status := agents.Status{Path: "/bin/echo"}
+	expectedCommand := "$ /bin/echo detected-path-used"
+	if runtime.GOOS == "windows" {
+		spec = &agents.CommandSpec{Program: "cmd", Args: []string{"/c", "echo", "detected-path-used"}}
+		agent = agents.Agent{Executable: "cmd"}
+		status = agents.Status{Path: filepath.Join(os.Getenv("SystemRoot"), "System32", "cmd.exe")}
+		expectedCommand = "$ " + status.Path + " /c echo detected-path-used"
+	}
 
 	exitCode := runCommandSpecForAgent(&stdout, &stderr, time.Second, spec, agent, status)
 	if exitCode != 0 {
 		t.Fatalf("exitCode = %d, want 0; stderr=%s", exitCode, stderr.String())
 	}
 	out := stdout.String()
-	if !strings.Contains(out, "$ /bin/printf detected-path-used") {
+	if !strings.Contains(out, expectedCommand) {
 		t.Fatalf("stdout did not show detected path command: %s", out)
 	}
 	if !strings.Contains(out, "detected-path-used") {
@@ -125,10 +133,57 @@ func TestRunHelpShowsUsageExamplesAndUninstall(t *testing.T) {
 		t.Fatalf("exitCode = %d, want 0; stderr=%s", exitCode, stderr.String())
 	}
 	out := stdout.String()
-	for _, want := range []string{"agentctl tui", "agentctl bundle <agent|all>", "agentctl backup openclaw", "agentctl uninstall <agent|all>", "agentctl version", "Examples:", "agentctl tui --dry-run", "agentctl install aionui", "agentctl update all", "agentctl uninstall codex"} {
+	for _, want := range []string{"agentctl tui", "agentctl bundle <agent|all>", "agentctl backup openclaw", "agentctl uninstall <agent|all>", "agentctl version", "Examples:", "agentctl tui --dry-run", "agentctl install aionui", "agentctl update all", "agentctl update all --exclude codex", "agentctl uninstall codex"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("help output missing %q: %s", want, out)
 		}
+	}
+}
+
+func TestParseUpdateArgsSupportsExcludeVariants(t *testing.T) {
+	name, exclude, err := parseUpdateArgs([]string{"all", "--exclude", "codex, gemini", "--exclude=openclaw"})
+	if err != nil {
+		t.Fatalf("parseUpdateArgs returned error: %v", err)
+	}
+	if name != "all" {
+		t.Fatalf("name = %q, want all", name)
+	}
+	for _, want := range []string{"codex", "gemini", "openclaw"} {
+		if _, ok := exclude[want]; !ok {
+			t.Fatalf("exclude missing %q: %#v", want, exclude)
+		}
+	}
+}
+
+func TestParseUpdateArgsRejectsExcludeWithoutValue(t *testing.T) {
+	_, _, err := parseUpdateArgs([]string{"all", "--exclude"})
+	if err == nil {
+		t.Fatal("expected missing-value error")
+	}
+	if !strings.Contains(err.Error(), "missing value for --exclude") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunUpdateRejectsExcludeForSingleAgent(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	exitCode := Run([]string{"update", "codex", "--exclude", "gemini"}, &stdout, &stderr)
+	if exitCode != 2 {
+		t.Fatalf("exitCode = %d, want 2", exitCode)
+	}
+	if !strings.Contains(stderr.String(), "--exclude can only be used with `agentctl update all`") {
+		t.Fatalf("stderr missing exclude guidance: %s", stderr.String())
+	}
+}
+
+func TestRunOpenClawLogsRejectsNativeWindowsGracefully(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	exitCode := runOpenClawLogs("windows", &stdout, &stderr)
+	if exitCode != 2 {
+		t.Fatalf("exitCode = %d, want 2", exitCode)
+	}
+	if !strings.Contains(stderr.String(), "not wired up on native Windows yet") {
+		t.Fatalf("stderr missing Windows guidance: %s", stderr.String())
 	}
 }
 
@@ -530,6 +585,9 @@ func TestWindowsOpenClawScriptsAvoidLinuxOnlySystemctlJournalctlBash(t *testing.
 func TestWriteAndLoadLatestOpenClawRollbackSnapshot(t *testing.T) {
 	tempHome := t.TempDir()
 	t.Setenv("HOME", tempHome)
+	t.Setenv("USERPROFILE", tempHome)
+	t.Setenv("HOMEDRIVE", "")
+	t.Setenv("HOMEPATH", "")
 
 	snapshotDir := filepath.Join(tempHome, ".openclaw", "agentctl", "rollback", "openclaw-20260503-120000")
 	if err := os.MkdirAll(snapshotDir, 0o700); err != nil {

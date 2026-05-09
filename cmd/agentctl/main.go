@@ -159,13 +159,22 @@ func runDoctor(args []string, stdout io.Writer, stderr io.Writer) int {
 }
 
 func runUpdate(args []string, stdout io.Writer, stderr io.Writer) int {
-	name := agentName(args)
+	name, exclude, err := parseUpdateArgs(args)
+	if err != nil {
+		fmt.Fprintf(stderr, "%s\n", err)
+		fmt.Fprintf(stderr, "usage: agentctl update <agent|all> [--exclude agent1,agent2]\n")
+		return 2
+	}
 	if name == "" {
-		fmt.Fprintf(stderr, "usage: agentctl update <agent|all>\n")
+		fmt.Fprintf(stderr, "usage: agentctl update <agent|all> [--exclude agent1,agent2]\n")
 		return 2
 	}
 	if name == "all" {
-		return runUpdateAll(stdout, stderr)
+		return runUpdateAll(exclude, stdout, stderr)
+	}
+	if len(exclude) > 0 {
+		fmt.Fprintln(stderr, "--exclude can only be used with `agentctl update all`")
+		return 2
 	}
 	if name == "openclaw" {
 		return openClawUpdate(stdout, stderr)
@@ -203,6 +212,14 @@ func runLogs(args []string, stdout io.Writer, stderr io.Writer) int {
 	name := agentName(args)
 	if name != "openclaw" {
 		fmt.Fprintf(stderr, "usage: agentctl logs openclaw\n")
+		return 2
+	}
+	return runOpenClawLogs(runtime.GOOS, stdout, stderr)
+}
+
+func runOpenClawLogs(goos string, stdout io.Writer, stderr io.Writer) int {
+	if goos == "windows" {
+		fmt.Fprintln(stderr, "openclaw logs are not wired up on native Windows yet; use `agentctl doctor openclaw` or run `agentctl logs openclaw` from WSL/Linux for journalctl-based gateway logs")
 		return 2
 	}
 	return runLogged(stdout, stderr, 30*time.Second, "journalctl", "--user", "-u", "openclaw-gateway", "--since", "30 minutes ago", "--no-pager")
@@ -249,6 +266,44 @@ func agentName(args []string) string {
 		return ""
 	}
 	return strings.ToLower(strings.TrimSpace(args[0]))
+}
+
+func parseUpdateArgs(args []string) (string, map[string]struct{}, error) {
+	name := ""
+	exclude := make(map[string]struct{})
+	for i := 0; i < len(args); i++ {
+		arg := strings.TrimSpace(args[i])
+		if arg == "" {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(arg, "--exclude="):
+			addExcludedAgents(exclude, strings.TrimPrefix(arg, "--exclude="))
+		case arg == "--exclude":
+			if i+1 >= len(args) {
+				return "", nil, fmt.Errorf("missing value for --exclude")
+			}
+			i++
+			addExcludedAgents(exclude, args[i])
+		case strings.HasPrefix(arg, "-"):
+			return "", nil, fmt.Errorf("unknown update flag: %s", arg)
+		case name == "":
+			name = strings.ToLower(arg)
+		default:
+			return "", nil, fmt.Errorf("unexpected update argument: %s", arg)
+		}
+	}
+	return name, exclude, nil
+}
+
+func addExcludedAgents(exclude map[string]struct{}, value string) {
+	for _, raw := range strings.Split(value, ",") {
+		name := strings.ToLower(strings.TrimSpace(raw))
+		if name == "" {
+			continue
+		}
+		exclude[name] = struct{}{}
+	}
 }
 
 type openClawRollbackSnapshot struct {
@@ -322,11 +377,15 @@ func installAgentByName(name string, stdout io.Writer, stderr io.Writer) int {
 	return 0
 }
 
-func runUpdateAll(stdout io.Writer, stderr io.Writer) int {
+func runUpdateAll(exclude map[string]struct{}, stdout io.Writer, stderr io.Writer) int {
 	platform := agents.PlatformFromGOOS(runtime.GOOS)
 	statuses := agents.CheckAllForPlatform(platform, exec.LookPath, captureCommandOutput)
 	code := 0
 	for _, status := range statuses {
+		if _, skipped := exclude[status.Name]; skipped {
+			fmt.Fprintf(stdout, "skip: %s excluded\n", status.Name)
+			continue
+		}
 		if status.State != "installed" {
 			fmt.Fprintf(stdout, "skip: %s missing\n", status.Name)
 			continue
@@ -1893,7 +1952,7 @@ func printHelp(w io.Writer) {
 	fmt.Fprintln(w, "  agentctl doctor <agent|all>")
 	fmt.Fprintln(w, "  agentctl bundle <agent|all>")
 	fmt.Fprintln(w, "  agentctl backup openclaw")
-	fmt.Fprintln(w, "  agentctl update <agent|all>")
+	fmt.Fprintln(w, "  agentctl update <agent|all> [--exclude agent1,agent2]")
 	fmt.Fprintln(w, "  agentctl uninstall <agent|all>")
 	fmt.Fprintln(w, "  agentctl version")
 	fmt.Fprintln(w, "  agentctl fix openclaw")
@@ -1905,6 +1964,7 @@ func printHelp(w io.Writer) {
 	fmt.Fprintln(w, "  agentctl status")
 	fmt.Fprintln(w, "  agentctl install aionui")
 	fmt.Fprintln(w, "  agentctl update all")
+	fmt.Fprintln(w, "  agentctl update all --exclude codex")
 	fmt.Fprintln(w, "  agentctl backup openclaw")
 	fmt.Fprintln(w, "  agentctl uninstall codex")
 	fmt.Fprintln(w, "  agentctl doctor openclaw")
