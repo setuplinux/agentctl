@@ -20,7 +20,7 @@ import (
 	"golang.org/x/term"
 )
 
-var version = "dev"
+var version = "0.2.0"
 
 var makeTerminalRaw = func(file *os.File) (func(), error) {
 	fd := int(file.Fd())
