@@ -34,6 +34,10 @@ go build -o bin/agentctl ./cmd/agentctl
 ./bin/agentctl setup
 ```
 
+## Contributing
+
+Day-to-day work happens on `dev`; `main` is kept as the stable release branch. See [CONTRIBUTING.md](CONTRIBUTING.md) for the branch and release flow.
+
 ## Agent skill
 
 This repo includes a reusable skill for AI agents that need to install or use `agentctl`:
