@@ -526,8 +526,8 @@ func displayAgentName(value string) string {
 	switch strings.ToLower(value) {
 	case "openclaw":
 		return "OpenClaw"
-	case "aionui":
-		return "AionUi"
+	case "multica":
+		return "Multica"
 	case "codex":
 		return "Codex"
 	case "claude":
@@ -1962,7 +1962,7 @@ func printHelp(w io.Writer) {
 	fmt.Fprintln(w, "Examples:")
 	fmt.Fprintln(w, "  agentctl tui --dry-run")
 	fmt.Fprintln(w, "  agentctl status")
-	fmt.Fprintln(w, "  agentctl install aionui")
+	fmt.Fprintln(w, "  agentctl install multica")
 	fmt.Fprintln(w, "  agentctl update all")
 	fmt.Fprintln(w, "  agentctl update all --exclude codex")
 	fmt.Fprintln(w, "  agentctl backup openclaw")

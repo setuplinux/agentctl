@@ -133,7 +133,7 @@ func TestRunHelpShowsUsageExamplesAndUninstall(t *testing.T) {
 		t.Fatalf("exitCode = %d, want 0; stderr=%s", exitCode, stderr.String())
 	}
 	out := stdout.String()
-	for _, want := range []string{"agentctl tui", "agentctl bundle <agent|all>", "agentctl backup openclaw", "agentctl uninstall <agent|all>", "agentctl version", "Examples:", "agentctl tui --dry-run", "agentctl install aionui", "agentctl update all", "agentctl update all --exclude codex", "agentctl uninstall codex"} {
+	for _, want := range []string{"agentctl tui", "agentctl bundle <agent|all>", "agentctl backup openclaw", "agentctl uninstall <agent|all>", "agentctl version", "Examples:", "agentctl tui --dry-run", "agentctl install multica", "agentctl update all", "agentctl update all --exclude codex", "agentctl uninstall codex"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("help output missing %q: %s", want, out)
 		}

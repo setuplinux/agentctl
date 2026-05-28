@@ -1,6 +1,6 @@
 # agentctl
 
-One small command to detect, install, update, uninstall, and manage local AI agent tools like Hermes, OpenClaw, Claude Code, Codex, Gemini CLI, and AionUi.
+One small command to detect, install, update, uninstall, and manage local AI agent tools like Hermes, OpenClaw, Claude Code, Codex, Gemini CLI, and Multica.
 
 ## Status
 
@@ -88,14 +88,14 @@ agentctl rollback openclaw
 - Codex: installs through `npm install -g @openai/codex`; on Windows, if npm is missing, `agentctl install codex` first tries to install Node.js LTS with `winget`.
 - Gemini CLI: installs through the official `npm install -g @google/gemini-cli` package; on Windows, if npm is missing, `agentctl install gemini` first tries to install Node.js LTS with `winget`; run `gemini` after install to authenticate.
 - Hermes: Linux and macOS install/update paths are cataloged; native Windows is intentionally not auto-installed.
-- AionUi: Linux install/update downloads the latest `.deb` from `iOfficeAI/AionUi` GitHub releases and installs it with `apt-get`; Linux uninstall uses `apt-get remove aionui`; launch Linux AionUi as a normal desktop user, not root. Windows install/update tries `winget install --id iOfficeAI.AionUi` first, then falls back to the latest GitHub `win-x64.exe`/`win-arm64.exe` installer with `/S` and adds `%LOCALAPPDATA%\Programs\AionUi` to the user PATH; Windows uninstall tries winget first, then the local `Uninstall AionUi.exe /S`; macOS is detect-only until app bundle install/update behavior is verified.
+- Multica: installs through the official Multica installer scripts on Linux, macOS, and Windows; updates through `multica update`; run `multica login` after install, then start the daemon if this host should run local agents.
 
 ## Examples
 
 ```bash
 agentctl version
 agentctl status
-agentctl install aionui
+agentctl install multica
 agentctl install gemini
 agentctl update all
 agentctl update all --exclude codex
