@@ -187,6 +187,29 @@ func TestRunOpenClawLogsRejectsNativeWindowsGracefully(t *testing.T) {
 	}
 }
 
+func TestLinuxUserServiceEnvFillsRootUserBusWhenUnset(t *testing.T) {
+	got := linuxUserServiceEnvForUID("0", []string{"HOME=/root", "PATH=/usr/bin"})
+	for _, want := range []string{"XDG_RUNTIME_DIR=/run/user/0", "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/0/bus"} {
+		if !containsString(got, want) {
+			t.Fatalf("linuxUserServiceEnvForUID() missing %q from %#v", want, got)
+		}
+	}
+}
+
+func TestLinuxUserServiceEnvPreservesExistingBusEnv(t *testing.T) {
+	got := linuxUserServiceEnvForUID("0", []string{"XDG_RUNTIME_DIR=/custom/run", "DBUS_SESSION_BUS_ADDRESS=unix:path=/custom/bus"})
+	for _, want := range []string{"XDG_RUNTIME_DIR=/custom/run", "DBUS_SESSION_BUS_ADDRESS=unix:path=/custom/bus"} {
+		if !containsString(got, want) {
+			t.Fatalf("linuxUserServiceEnvForUID() did not preserve %q in %#v", want, got)
+		}
+	}
+	for _, forbidden := range []string{"XDG_RUNTIME_DIR=/run/user/0", "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/0/bus"} {
+		if containsString(got, forbidden) {
+			t.Fatalf("linuxUserServiceEnvForUID() should not add fallback %q when env already set: %#v", forbidden, got)
+		}
+	}
+}
+
 func TestRunTUIDryRunShowsAgentAndActionMenus(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	input := strings.NewReader("q")

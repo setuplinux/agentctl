@@ -654,7 +654,7 @@ func openClawDoctor(stdout io.Writer, stderr io.Writer) int {
 	if runtime.GOOS == "windows" {
 		_ = runLogged(stdout, stderr, 30*time.Second, "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", windowsOpenClawServiceStatusScript)
 	} else {
-		_ = runLogged(stdout, stderr, 30*time.Second, "systemctl", "--user", "show", "openclaw-gateway", "-p", "MainPID", "-p", "NRestarts", "-p", "ActiveState", "-p", "SubState", "-p", "ExecMainStatus", "-p", "MemoryCurrent")
+		_ = runLoggedEnv(stdout, stderr, 30*time.Second, linuxUserServiceEnv(), "systemctl", "--user", "show", "openclaw-gateway", "-p", "MainPID", "-p", "NRestarts", "-p", "ActiveState", "-p", "SubState", "-p", "ExecMainStatus", "-p", "MemoryCurrent")
 	}
 
 	fmt.Fprintln(stdout, "\n== OpenClaw gateway RPC ==")
@@ -669,7 +669,7 @@ func openClawDoctor(stdout io.Writer, stderr io.Writer) int {
 	if runtime.GOOS == "windows" {
 		_ = runLogged(stdout, stderr, 45*time.Second, "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", windowsOpenClawRecentLogsScript)
 	} else {
-		_ = runShell(stdout, stderr, 45*time.Second, linuxOpenClawActionableLogsScript)
+		_ = runShellEnv(stdout, stderr, 45*time.Second, linuxUserServiceEnv(), linuxOpenClawActionableLogsScript)
 	}
 	return code
 }
@@ -757,7 +757,7 @@ func restartOpenClawGateway(stdout io.Writer, stderr io.Writer) int {
 		}
 		return runLogged(stdout, stderr, 2*time.Minute, "openclaw", "gateway", "start")
 	}
-	return runLogged(stdout, stderr, 2*time.Minute, "systemctl", "--user", "restart", "openclaw-gateway")
+	return runLoggedEnv(stdout, stderr, 2*time.Minute, linuxUserServiceEnv(), "systemctl", "--user", "restart", "openclaw-gateway")
 }
 
 func openClawFixWindows(stdout io.Writer, stderr io.Writer) int {
@@ -809,7 +809,7 @@ func openClawFix(stdout io.Writer, stderr io.Writer) int {
 
 	restartSince := time.Now().Add(-2 * time.Second).Format("2006-01-02 15:04:05")
 	fmt.Fprintln(stdout, "repair: restarting openclaw-gateway")
-	if c := runLogged(stdout, stderr, 2*time.Minute, "systemctl", "--user", "restart", "openclaw-gateway"); c != 0 {
+	if c := runLoggedEnv(stdout, stderr, 2*time.Minute, linuxUserServiceEnv(), "systemctl", "--user", "restart", "openclaw-gateway"); c != 0 {
 		return c
 	}
 	fmt.Fprintln(stdout, "repair: waiting for startup")
@@ -1021,6 +1021,7 @@ func logMentions(stdout io.Writer, stderr io.Writer, needle string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "bash", "-lc", "journalctl --user -u openclaw-gateway --since '2 hours ago' --no-pager | grep -F -- \"$0\" >/dev/null", needle)
+	cmd.Env = append(os.Environ(), linuxUserServiceEnv()...)
 	return cmd.Run() == nil
 }
 
@@ -1028,7 +1029,43 @@ func recentGatewayLogMentions(since string, needle string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "bash", "-lc", "journalctl --user -u openclaw-gateway --since \"$0\" --no-pager | grep -F -- \"$1\" >/dev/null", since, needle)
+	cmd.Env = append(os.Environ(), linuxUserServiceEnv()...)
 	return cmd.Run() == nil
+}
+
+func linuxUserServiceEnv() []string {
+	return linuxUserServiceEnvForUID(fmt.Sprint(os.Getuid()), os.Environ())
+}
+
+func linuxUserServiceEnvForUID(uid string, environ []string) []string {
+	if uid == "" {
+		return nil
+	}
+	runtimeDir, hasRuntimeDir := envValue(environ, "XDG_RUNTIME_DIR")
+	busAddress, hasBusAddress := envValue(environ, "DBUS_SESSION_BUS_ADDRESS")
+	env := make([]string, 0, 2)
+	if hasRuntimeDir {
+		env = append(env, "XDG_RUNTIME_DIR="+runtimeDir)
+	} else {
+		runtimeDir = "/run/user/" + uid
+		env = append(env, "XDG_RUNTIME_DIR="+runtimeDir)
+	}
+	if hasBusAddress {
+		env = append(env, "DBUS_SESSION_BUS_ADDRESS="+busAddress)
+	} else {
+		env = append(env, "DBUS_SESSION_BUS_ADDRESS=unix:path="+runtimeDir+"/bus")
+	}
+	return env
+}
+
+func envValue(environ []string, key string) (string, bool) {
+	prefix := key + "="
+	for _, item := range environ {
+		if strings.HasPrefix(item, prefix) {
+			return strings.TrimPrefix(item, prefix), true
+		}
+	}
+	return "", false
 }
 
 func runLogged(stdout io.Writer, stderr io.Writer, timeout time.Duration, name string, args ...string) int {
@@ -1068,7 +1105,11 @@ func runLoggedEnv(stdout io.Writer, stderr io.Writer, timeout time.Duration, env
 }
 
 func runShell(stdout io.Writer, stderr io.Writer, timeout time.Duration, script string) int {
-	return runLogged(stdout, stderr, timeout, "bash", "-lc", script)
+	return runShellEnv(stdout, stderr, timeout, nil, script)
+}
+
+func runShellEnv(stdout io.Writer, stderr io.Writer, timeout time.Duration, env []string, script string) int {
+	return runLoggedEnv(stdout, stderr, timeout, env, "bash", "-lc", script)
 }
 
 func createOpenClawRollbackSnapshot(stdout io.Writer, stderr io.Writer) (*openClawRollbackSnapshot, int) {
