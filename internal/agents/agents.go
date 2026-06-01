@@ -11,39 +11,6 @@ import (
 
 var ErrNotFound = errors.New("agent executable not found")
 
-const aionUiLinuxUninstallScript = `
-set -euo pipefail
-if [ "$(id -u)" -eq 0 ]; then
-  apt-get remove -y aionui
-elif command -v sudo >/dev/null 2>&1; then
-  sudo apt-get remove -y aionui
-else
-  echo "AionUi uninstall requires root or sudo" >&2
-  exit 1
-fi
-`
-
-const aionUiWindowsUninstallScript = `
-$ErrorActionPreference = "Stop"
-$winget = Get-Command winget -ErrorAction SilentlyContinue
-if ($winget) {
-  winget uninstall --id iOfficeAI.AionUi --exact --accept-source-agreements
-  if ($LASTEXITCODE -eq 0) { exit 0 }
-  Write-Host "winget uninstall iOfficeAI.AionUi failed; trying local uninstaller..."
-}
-$candidates = @()
-foreach ($root in @($env:LOCALAPPDATA, $env:ProgramFiles, ${env:ProgramFiles(x86)})) {
-  if ($root) { $candidates += Join-Path $root "Programs\AionUi\Uninstall AionUi.exe" }
-  if ($root) { $candidates += Join-Path $root "AionUi\Uninstall AionUi.exe" }
-}
-$candidates = $candidates | Where-Object { $_ -and (Test-Path $_) }
-if (-not $candidates) { throw "AionUi uninstaller not found" }
-$uninstaller = $candidates | Select-Object -First 1
-Write-Host "uninstall: $uninstaller /S"
-$process = Start-Process -FilePath $uninstaller -ArgumentList "/S" -Wait -PassThru
-exit $process.ExitCode
-`
-
 const npmUninstallCodexScript = `npm uninstall -g @openai/codex`
 
 const claudeUnixUninstallScript = `
@@ -90,88 +57,96 @@ if ($npm) { npm uninstall -g openclaw }
 exit 0
 `
 
-const aionUiLinuxDebInstallScript = `
+const multicaUnixInstallScript = `
 set -euo pipefail
 need() { command -v "$1" >/dev/null 2>&1 || { echo "missing required command: $1" >&2; exit 1; }; }
 need curl
 need python3
+need tar
+os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+case "$os" in
+  linux|darwin) ;;
+  *) echo "unsupported multica OS: $os" >&2; exit 2 ;;
+esac
 arch="$(uname -m)"
 case "$arch" in
   x86_64|amd64) asset_arch="amd64" ;;
   aarch64|arm64) asset_arch="arm64" ;;
-  *) echo "unsupported AionUi Linux architecture: $arch" >&2; exit 2 ;;
+  *) echo "unsupported multica architecture: $arch" >&2; exit 2 ;;
 esac
-asset_url="$({ python3 - "$asset_arch" <<'PY'
+asset_url="$({ python3 - "$os" "$asset_arch" <<'PY'
 import json, sys, urllib.request
-asset_arch = sys.argv[1]
+os_name, asset_arch = sys.argv[1], sys.argv[2]
 req = urllib.request.Request(
-    'https://api.github.com/repos/iOfficeAI/AionUi/releases/latest',
+    'https://api.github.com/repos/multica-ai/multica/releases/latest',
     headers={'Accept':'application/vnd.github+json','User-Agent':'agentctl'}
 )
 data = json.load(urllib.request.urlopen(req, timeout=30))
-suffix = f'linux-{asset_arch}.deb'
+suffix = f'multica_{os_name}_{asset_arch}.tar.gz'
 for asset in data.get('assets', []):
-    if asset.get('name', '').endswith(suffix):
+    if asset.get('name', '') == suffix:
         print(asset['browser_download_url'])
         break
 else:
-    raise SystemExit(f'no AionUi release asset ending with {suffix}')
+    raise SystemExit(f'no multica release asset named {suffix}')
 PY
 } )"
 tmp_parent="${TMPDIR:-/var/tmp}"
 if [ ! -d "$tmp_parent" ] || [ ! -w "$tmp_parent" ]; then
   tmp_parent="/tmp"
 fi
-tmpdir="$(mktemp -d -p "$tmp_parent" agentctl-aionui.XXXXXX)"
+tmpdir="$(mktemp -d -p "$tmp_parent" agentctl-multica.XXXXXX)"
 trap 'rm -rf "$tmpdir"' EXIT
-deb="$tmpdir/aionui.deb"
+archive="$tmpdir/multica.tar.gz"
 echo "download: $asset_url"
-curl -fL "$asset_url" -o "$deb"
-if [ "$(id -u)" -eq 0 ]; then
-  apt-get install -y "$deb"
-elif command -v sudo >/dev/null 2>&1; then
-  sudo apt-get install -y "$deb"
-else
-  echo "AionUi .deb downloaded to $deb but installing requires root or sudo" >&2
+curl -fL "$asset_url" -o "$archive"
+tar -xzf "$archive" -C "$tmpdir"
+binary="$(find "$tmpdir" -type f -name multica -perm /111 | head -n 1)"
+if [ -z "$binary" ]; then
+  echo "multica binary not found in release archive" >&2
   exit 1
 fi
+install_dir="${HOME:-}/.local/bin"
+if [ "$(id -u)" -eq 0 ] && [ -d /usr/local/bin ] && [ -w /usr/local/bin ]; then
+  install_dir="/usr/local/bin"
+fi
+mkdir -p "$install_dir"
+install -m 0755 "$binary" "$install_dir/multica"
+echo "installed: $install_dir/multica"
 `
 
-const aionUiWindowsInstallScript = `
+const multicaWindowsInstallScript = `
 $ErrorActionPreference = "Stop"
-$winget = Get-Command winget -ErrorAction SilentlyContinue
-if ($winget) {
-  winget install --id iOfficeAI.AionUi --exact --accept-package-agreements --accept-source-agreements
-  if ($LASTEXITCODE -eq 0) { exit 0 }
-  Write-Host "winget package iOfficeAI.AionUi was not installable; falling back to GitHub release installer..."
-}
-$arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
-$release = Invoke-RestMethod -Headers @{"User-Agent"="agentctl"} -Uri "https://api.github.com/repos/iOfficeAI/AionUi/releases/latest"
-$suffix = "win-$arch.exe"
-$asset = $release.assets | Where-Object { $_.name.EndsWith($suffix) } | Select-Object -First 1
-if (-not $asset) { throw "No AionUi release asset ending with $suffix" }
-$installer = Join-Path $env:TEMP $asset.name
+$arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "amd64" }
+$release = Invoke-RestMethod -Headers @{"User-Agent"="agentctl"} -Uri "https://api.github.com/repos/multica-ai/multica/releases/latest"
+$name = "multica_windows_$arch.zip"
+$asset = $release.assets | Where-Object { $_.name -eq $name } | Select-Object -First 1
+if (-not $asset) { throw "No multica release asset named $name" }
+$installDir = Join-Path $env:LOCALAPPDATA "multica"
+New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+$archive = Join-Path $env:TEMP $asset.name
 Write-Host "download: $($asset.browser_download_url)"
-Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $installer
-Write-Host "install: $installer /S"
-$process = Start-Process -FilePath $installer -ArgumentList "/S" -Wait -PassThru
-if ($process.ExitCode -ne 0) { exit $process.ExitCode }
-$installDir = Join-Path $env:LOCALAPPDATA "Programs\AionUi"
+Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $archive
+Expand-Archive -Path $archive -DestinationPath $installDir -Force
+$candidates = Get-ChildItem -Path $installDir -Recurse -Filter "multica.exe" | Select-Object -First 1
+if (-not $candidates) { throw "multica.exe not found in release archive" }
+Copy-Item -Force $candidates.FullName (Join-Path $installDir "multica.exe")
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-$pathParts = @()
-if ($userPath) { $pathParts = $userPath -split ';' | Where-Object { $_ } }
+$parts = @()
+if ($userPath) { $parts = $userPath -split ';' | Where-Object { $_ } }
 $alreadyInPath = $false
-foreach ($part in $pathParts) {
-  if ($part.TrimEnd('\') -ieq $installDir.TrimEnd('\')) { $alreadyInPath = $true; break }
+foreach ($part in $parts) {
+  if ($part.TrimEnd('\\') -ieq $installDir.TrimEnd('\\')) { $alreadyInPath = $true; break }
 }
 if (-not $alreadyInPath) {
   $newUserPath = if ($userPath) { "$userPath;$installDir" } else { $installDir }
   [Environment]::SetEnvironmentVariable("Path", $newUserPath, "User")
-  Write-Host "path: added $installDir to user PATH. Open a new terminal to use AionUi.exe directly."
+  Write-Host "path: added $installDir to user PATH. Open a new terminal to use multica.exe directly."
 }
 if (($env:PATH -split ';') -notcontains $installDir) {
   $env:PATH = "$installDir;$env:PATH"
 }
+Write-Host "installed: $(Join-Path $installDir 'multica.exe')"
 exit 0
 `
 
@@ -549,50 +524,48 @@ func Supported() []Agent {
 			},
 		},
 		{
-			Name:        "aionui",
-			Executable:  "AionUi",
-			Description: "AionUi desktop cowork app for local AI agents",
+			Name:        "multica",
+			Executable:  "multica",
+			Description: "Multica CLI and local agent runtime",
+			VersionArgs: []string{"--version"},
 			Platforms: map[Platform]PlatformSupport{
 				PlatformLinux: {
 					Install: &CommandSpec{
 						Program: "bash",
-						Args:    []string{"-lc", aionUiLinuxDebInstallScript},
+						Args:    []string{"-lc", multicaUnixInstallScript},
 					},
 					Update: &CommandSpec{
-						Program: "bash",
-						Args:    []string{"-lc", aionUiLinuxDebInstallScript},
+						Program: "multica",
+						Args:    []string{"update"},
 					},
-					Uninstall: &CommandSpec{
-						Program: "bash",
-						Args:    []string{"-lc", aionUiLinuxUninstallScript},
-					},
-					FirstRunHint: "Launch `AionUi` as a normal desktop user; Electron will not run as root without --no-sandbox, and root GUI app state is not recommended.",
+					FirstRunHint: "Run `multica setup` to authenticate and start the local daemon.",
 					Notes: []string{
-						"Linux install/update downloads the latest AionUi .deb from iOfficeAI/AionUi GitHub releases and installs it with apt-get.",
+						"Linux install downloads the latest multica CLI archive from multica-ai/multica GitHub releases.",
 					},
 				},
 				PlatformDarwin: {
-					FirstRunHint: "Install the latest AionUi .dmg/.zip from https://github.com/iOfficeAI/AionUi/releases, then launch AionUi from /Applications.",
-					Notes: []string{
-						"macOS AionUi is currently detect-only in agentctl; app bundle install/update is left to AionUi's Electron updater or manual GitHub release install.",
+					Install: &CommandSpec{
+						Program: "bash",
+						Args:    []string{"-lc", multicaUnixInstallScript},
 					},
+					Update: &CommandSpec{
+						Program: "multica",
+						Args:    []string{"update"},
+					},
+					FirstRunHint: "Run `multica setup` to authenticate and start the local daemon.",
 				},
 				PlatformWindows: {
 					Install: &CommandSpec{
 						Program: "powershell",
-						Args:    []string{"-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", aionUiWindowsInstallScript},
+						Args:    []string{"-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", multicaWindowsInstallScript},
 					},
 					Update: &CommandSpec{
-						Program: "powershell",
-						Args:    []string{"-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", aionUiWindowsInstallScript},
+						Program: "multica",
+						Args:    []string{"update"},
 					},
-					Uninstall: &CommandSpec{
-						Program: "powershell",
-						Args:    []string{"-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", aionUiWindowsUninstallScript},
-					},
-					FirstRunHint: "Launch AionUi after install; it auto-detects installed ACP/CLI agents such as Hermes, OpenClaw, Claude Code, Codex, Qwen, and OpenCode.",
+					FirstRunHint: "Run `multica setup` to authenticate and start the local daemon.",
 					Notes: []string{
-						"Windows install/update uses winget package iOfficeAI.AionUi from https://www.aionui.com/download/.",
+						"Windows install downloads the latest multica CLI zip from multica-ai/multica GitHub releases and adds %LOCALAPPDATA%\\multica to the user PATH.",
 					},
 				},
 			},
@@ -723,6 +696,9 @@ func windowsExecutableCandidates(agent Agent) []string {
 		candidates = append(candidates,
 			filepath.Join(localAppData, "Programs", agent.Executable, agent.Executable+".exe"),
 		)
+		if agent.Name == "multica" {
+			candidates = append(candidates, filepath.Join(localAppData, "multica", "multica.exe"))
+		}
 	}
 	if programFiles != "" {
 		candidates = append(candidates,

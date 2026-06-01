@@ -7,7 +7,7 @@ description: Use when detecting, installing, updating, uninstalling, or troubles
 
 ## Overview
 
-`agentctl` is a cross-platform CLI for managing local AI agent tools such as Hermes, OpenClaw, Claude Code, Codex, Gemini CLI, and AionUi.
+`agentctl` is a cross-platform CLI for managing local AI agent tools such as Hermes, OpenClaw, Claude Code, Codex, Gemini CLI, and Multica.
 
 Use it as the safe first stop for agent inventory, health checks, installs, updates, and uninstalls.
 
@@ -93,7 +93,7 @@ openclaw
 claude
 codex
 gemini
-aionui
+multica
 ```
 
 ## Installing Agents
@@ -107,7 +107,7 @@ agentctl status
 Install one missing agent:
 
 ```bash
-agentctl install aionui
+agentctl install multica
 agentctl install openclaw
 agentctl install claude
 agentctl install codex
@@ -133,7 +133,7 @@ Prefer targeted updates:
 
 ```bash
 agentctl update openclaw
-agentctl update aionui
+agentctl update multica
 ```
 
 Avoid broad updates unless the user asked for them and the risk is acceptable:
@@ -191,13 +191,12 @@ hermes doctor
 hermes gateway status
 ```
 
-AionUi:
+Multica:
 
 ```bash
-command -v AionUi
+multica --version
+multica daemon status
 ```
-
-Do not use `AionUi --version` for status checks; Electron may launch app behavior or hang.
 
 ## Platform Notes
 
@@ -207,33 +206,19 @@ Do not use `AionUi --version` for status checks; Electron may launch app behavio
 
 On a clean Windows install, `agentctl.exe` itself does not require Node.js or npm. Agents installed through npm packages, such as Codex and Gemini CLI, need npm; `agentctl install codex`, `agentctl update codex`, `agentctl install gemini`, and `agentctl update gemini` try to install Node.js LTS with `winget` first when npm is missing.
 
-AionUi may install to:
+Multica may install to:
 
 ```text
-%LOCALAPPDATA%\Programs\AionUi\AionUi.exe
+%LOCALAPPDATA%\multica\multica.exe
 ```
 
-Do not assume PATH alone proves whether AionUi is installed. `agentctl status` has richer known-path detection.
+Do not assume PATH alone proves whether Multica is installed. `agentctl status` has richer known-path detection.
 
 Native Windows Hermes may be unsupported or intentionally omitted. WSL is usually the expected Hermes path.
 
 ### Linux
 
-AionUi is an Electron desktop app. Do not launch it as root by default.
-
-Preferred:
-
-```bash
-sudo -iu <desktop-user> AionUi
-```
-
-Root-only testing may require both a display and Chromium sandbox bypass:
-
-```bash
-DISPLAY=:0 XAUTHORITY=/home/DESKTOP_USER/.Xauthority AionUi --no-sandbox --user-data-dir=/tmp/aionui-root
-```
-
-That is a debug workaround, not normal operation.
+`agentctl install multica` installs the CLI binary, not a desktop app. After install, run `multica setup` when authentication or daemon setup is needed.
 
 ### macOS
 
@@ -251,8 +236,6 @@ Some agents may be detect-only until unattended installer behavior is verified. 
 ## Common Mistakes
 
 - Checking only `command -v` when `agentctl status` has richer detection.
-- Treating AionUi as a headless CLI.
-- Running Electron apps as root.
 - Updating or uninstalling all agents without explicit approval.
 - Printing credentials while debugging auth.
 - Assuming one agent's OAuth login can safely be reused by another agent.

@@ -9,7 +9,7 @@ import (
 
 func TestSupportedAgentsIncludesCatalogOrder(t *testing.T) {
 	got := Supported()
-	want := []string{"hermes", "openclaw", "claude", "codex", "gemini", "aionui"}
+	want := []string{"hermes", "openclaw", "claude", "codex", "gemini", "multica"}
 
 	if len(got) != len(want) {
 		t.Fatalf("Supported() length = %d, want %d (%v)", len(got), len(want), got)
@@ -21,77 +21,48 @@ func TestSupportedAgentsIncludesCatalogOrder(t *testing.T) {
 	}
 }
 
-func TestAionUiLinuxSupportInstallsAndUpdatesFromLatestDeb(t *testing.T) {
-	agent, ok := Find("aionui")
-	if !ok {
-		t.Fatal("Find(aionui) = false")
+func TestAionUiRemovedFromCatalog(t *testing.T) {
+	if _, ok := Find("aionui"); ok {
+		t.Fatal("Find(aionui) = true, want AionUi removed from supported agents")
 	}
-	if agent.Executable != "AionUi" {
-		t.Fatalf("Executable = %q, want AionUi", agent.Executable)
-	}
-	if len(agent.VersionArgs) != 0 {
-		t.Fatalf("AionUi VersionArgs = %v, want none because Electron --version launches app state", agent.VersionArgs)
-	}
-	support, ok := agent.Platforms[PlatformLinux]
-	if !ok {
-		t.Fatal("AionUi missing Linux support")
-	}
-	if support.Install == nil {
-		t.Fatal("AionUi Linux install command is nil")
-	}
-	if support.Update == nil {
-		t.Fatal("AionUi Linux update command is nil")
-	}
-	if support.Uninstall == nil {
-		t.Fatal("AionUi Linux uninstall command is nil")
-	}
-	install := support.Install.Program + " " + strings.Join(support.Install.Args, " ")
-	update := support.Update.Program + " " + strings.Join(support.Update.Args, " ")
-	for _, command := range []string{install, update} {
-		for _, want := range []string{"api.github.com/repos/iOfficeAI/AionUi/releases/latest", ".deb", "apt-get", "/var/tmp"} {
-			if !strings.Contains(command, want) {
-				t.Fatalf("AionUi command missing %q: %s", want, command)
-			}
-		}
-	}
-	uninstall := support.Uninstall.Program + " " + strings.Join(support.Uninstall.Args, " ")
-	for _, want := range []string{"apt-get", "remove", "aionui"} {
-		if !strings.Contains(uninstall, want) {
-			t.Fatalf("AionUi Linux uninstall command missing %q: %s", want, uninstall)
+	for _, agent := range Supported() {
+		if strings.Contains(strings.ToLower(agent.Name+agent.Executable+agent.Description), "aion") {
+			t.Fatalf("supported catalog still references AionUi: %+v", agent)
 		}
 	}
 }
 
-func TestAionUiWindowsSupportInstallsAndUpdatesWithWinget(t *testing.T) {
-	agent, ok := Find("aionui")
+func TestMulticaSupportInstallsAndUpdatesFromOfficialReleases(t *testing.T) {
+	agent, ok := Find("multica")
 	if !ok {
-		t.Fatal("Find(aionui) = false")
+		t.Fatal("Find(multica) = false")
 	}
-	support, ok := agent.Platforms[PlatformWindows]
-	if !ok {
-		t.Fatal("AionUi missing Windows support")
+	if agent.Executable != "multica" {
+		t.Fatalf("Executable = %q, want multica", agent.Executable)
 	}
-	if support.Install == nil {
-		t.Fatal("AionUi Windows install command is nil")
+	if strings.Join(agent.VersionArgs, " ") != "--version" {
+		t.Fatalf("Multica VersionArgs = %v, want --version", agent.VersionArgs)
 	}
-	if support.Update == nil {
-		t.Fatal("AionUi Windows update command is nil")
-	}
-	if support.Uninstall == nil {
-		t.Fatal("AionUi Windows uninstall command is nil")
-	}
-	for label, spec := range map[string]*CommandSpec{"install": support.Install, "update": support.Update} {
-		command := spec.Program + " " + strings.Join(spec.Args, " ")
-		for _, want := range []string{"winget", "iOfficeAI.AionUi", "--accept-package-agreements", "--accept-source-agreements", "api.github.com/repos/iOfficeAI/AionUi/releases/latest", "win-$arch.exe", "/S", "Programs\\AionUi", "SetEnvironmentVariable"} {
-			if !strings.Contains(command, want) {
-				t.Fatalf("AionUi Windows %s command missing %q: %s", label, want, command)
-			}
+	for _, platform := range []Platform{PlatformLinux, PlatformDarwin, PlatformWindows} {
+		support, ok := agent.Platforms[platform]
+		if !ok {
+			t.Fatalf("Multica missing %s support", platform)
 		}
-	}
-	uninstall := support.Uninstall.Program + " " + strings.Join(support.Uninstall.Args, " ")
-	for _, want := range []string{"winget", "uninstall", "iOfficeAI.AionUi", "Uninstall AionUi.exe", "/S"} {
-		if !strings.Contains(uninstall, want) {
-			t.Fatalf("AionUi Windows uninstall command missing %q: %s", want, uninstall)
+		if support.Install == nil {
+			t.Fatalf("Multica %s install command is nil", platform)
+		}
+		if support.Update == nil {
+			t.Fatalf("Multica %s update command is nil", platform)
+		}
+		update := support.Update.Program + " " + strings.Join(support.Update.Args, " ")
+		if update != "multica update" {
+			t.Fatalf("Multica %s update = %q, want multica update", platform, update)
+		}
+		install := support.Install.Program + " " + strings.Join(support.Install.Args, " ")
+		for _, want := range []string{"api.github.com/repos/multica-ai/multica/releases/latest", "multica"} {
+			if !strings.Contains(install, want) {
+				t.Fatalf("Multica %s install command missing %q: %s", platform, want, install)
+			}
 		}
 	}
 }
@@ -99,7 +70,7 @@ func TestAionUiWindowsSupportInstallsAndUpdatesWithWinget(t *testing.T) {
 func TestEveryAgentInstallSupportHasUninstallExceptInteractiveHermes(t *testing.T) {
 	for _, agent := range Supported() {
 		for platform, support := range agent.Platforms {
-			if agent.Name == "hermes" {
+			if agent.Name == "hermes" || agent.Name == "multica" {
 				continue
 			}
 			if support.Install != nil && support.Uninstall == nil {
@@ -159,7 +130,7 @@ func TestWindowsSupportFlagsReflectCatalog(t *testing.T) {
 	assertSupport(t, statuses, "openclaw", true, true)
 	assertSupport(t, statuses, "codex", true, true)
 	assertSupport(t, statuses, "gemini", true, true)
-	assertSupport(t, statuses, "aionui", true, true)
+	assertSupport(t, statuses, "multica", true, true)
 }
 
 func TestWindowsInstallsDoNotAssumeNpmIsAlreadyInstalled(t *testing.T) {
@@ -275,17 +246,17 @@ func TestGeminiWindowsUpdateAlsoBootstrapsNodeWithWinget(t *testing.T) {
 	}
 }
 
-func TestWindowsDetectionFindsAionUiInLocalAppProgramsWhenPathIsStale(t *testing.T) {
+func TestWindowsDetectionFindsMulticaInLocalAppDataWhenPathIsStale(t *testing.T) {
 	tempHome := t.TempDir()
 	t.Setenv("LOCALAPPDATA", filepath.Join(tempHome, "AppData", "Local"))
 	t.Setenv("USERPROFILE", tempHome)
 	t.Setenv("APPDATA", filepath.Join(tempHome, "AppData", "Roaming"))
 
-	aionPath := filepath.Join(tempHome, "AppData", "Local", "Programs", "AionUi", "AionUi.exe")
-	if err := os.MkdirAll(filepath.Dir(aionPath), 0o755); err != nil {
+	multicaPath := filepath.Join(tempHome, "AppData", "Local", "multica", "multica.exe")
+	if err := os.MkdirAll(filepath.Dir(multicaPath), 0o755); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
-	if err := os.WriteFile(aionPath, []byte("stub"), 0o755); err != nil {
+	if err := os.WriteFile(multicaPath, []byte("stub"), 0o755); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
@@ -293,17 +264,17 @@ func TestWindowsDetectionFindsAionUiInLocalAppProgramsWhenPathIsStale(t *testing
 		return "", ErrNotFound
 	}
 
-	agent, ok := Find("aionui")
+	agent, ok := Find("multica")
 	if !ok {
-		t.Fatal("Find(aionui) = false")
+		t.Fatal("Find(multica) = false")
 	}
 	status := CheckAgent(PlatformWindows, agent, lookup, nil)
 
 	if status.State != "installed" {
 		t.Fatalf("status.State = %q, want installed", status.State)
 	}
-	if status.Path != aionPath {
-		t.Fatalf("status.Path = %q, want %q", status.Path, aionPath)
+	if status.Path != multicaPath {
+		t.Fatalf("status.Path = %q, want %q", status.Path, multicaPath)
 	}
 }
 

@@ -60,6 +60,5 @@ function Add-AgentctlPath {
 Add-AgentctlPath $InstallDir
 Add-AgentctlPath (Join-Path $env:APPDATA "npm")
 Add-AgentctlPath (Join-Path $env:USERPROFILE ".local\bin")
-Add-AgentctlPath (Join-Path $env:LOCALAPPDATA "Programs\AionUi")
 
 & $OutFile status
